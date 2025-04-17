@@ -1,0 +1,202 @@
+// server.js
+const express = require('express');
+const bodyParser = require('body-parser');
+const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
+const { spawn } = require('child_process');
+const ffmpeg = require('fluent-ffmpeg');
+const { v4: uuidv4 } = require('uuid');
+const axios = require('axios');
+const FormData = require('form-data');
+
+// Initialize app
+const app = express();
+const port = process.env.PORT || 5000;
+
+// Middleware
+app.use(cors());
+app.use(bodyParser.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Create directories if they don't exist
+const tempDir = path.join(__dirname, 'temp');
+const clipsDir = path.join(__dirname, 'public', 'clips');
+
+if (!fs.existsSync(tempDir)) {
+  fs.mkdirSync(tempDir, { recursive: true });
+}
+
+if (!fs.existsSync(clipsDir)) {
+  fs.mkdirSync(clipsDir, { recursive: true });
+}
+
+// Keep track of active jobs
+const activeJobs = new Map();
+
+// API endpoint to capture stream
+app.post('/api/capture-stream', async (req, res) => {
+  try {
+    const { url, platform, quality, duration } = req.body;
+    
+    if (!url) {
+      return res.status(400).json({ error: 'Stream URL is required' });
+    }
+
+    // Generate a unique ID for this capture
+    const captureId = uuidv4();
+    const outputFile = path.join(tempDir, `${captureId}.mp4`);
+    const previewFile = path.join(clipsDir, `preview_${captureId}.mp4`);
+    
+    console.log(`Capturing stream from ${url}`);
+    
+    // Use yt-dlp to capture stream segment
+    const args = [
+      '-f', 'best',
+      '--no-playlist',
+      '--no-check-certificate',
+      '--downloader', 'ffmpeg',
+      '--downloader-args', `ffmpeg:-t ${duration}`,
+      '-o', outputFile,
+      url
+    ];
+    
+    // Adjust format based on quality setting
+    if (quality === 'low') {
+      args[1] = 'worst[height>=480]';
+    } else if (quality === 'medium') {
+      args[1] = 'best[height<=720]';
+    } else if (quality === 'high') {
+      args[1] = 'best[height<=1080]';
+    }
+    
+    // Track job status
+    activeJobs.set(captureId, {
+      status: 'capturing',
+      progress: 0,
+      outputFile,
+      previewFile
+    });
+    
+    // Start capture process
+    const ytDlp = spawn('yt-dlp', args);
+    
+    ytDlp.stdout.on('data', (data) => {
+      console.log(`yt-dlp stdout: ${data}`);
+      
+      // Try to parse progress
+      const output = data.toString();
+      const downloadMatch = output.match(/(\d+\.\d+)%/);
+      
+      if (downloadMatch && downloadMatch[1]) {
+        const progress = parseFloat(downloadMatch[1]);
+        const job = activeJobs.get(captureId);
+        if (job) {
+          job.progress = progress;
+          activeJobs.set(captureId, job);
+        }
+      }
+    });
+    
+    ytDlp.stderr.on('data', (data) => {
+      console.error(`yt-dlp stderr: ${data}`);
+    });
+    
+    ytDlp.on('close', (code) => {
+      console.log(`yt-dlp process exited with code ${code}`);
+      
+      if (code !== 0) {
+        const job = activeJobs.get(captureId);
+        if (job) {
+          job.status = 'error';
+          job.error = 'Failed to capture stream';
+          activeJobs.set(captureId, job);
+        }
+        return;
+      }
+      
+      // Create a small preview file from the captured stream
+      console.log('Creating preview file...');
+      
+      ffmpeg(outputFile)
+        .output(previewFile)
+        .videoCodec('libx264')
+        .size('640x?')
+        .audioCodec('aac')
+        .audioBitrate('128k')
+        .outputOptions(['-preset veryfast', '-movflags faststart'])
+        .on('progress', (progress) => {
+          console.log(`Processing: ${progress.percent}% done`);
+          
+          const job = activeJobs.get(captureId);
+          if (job) {
+            job.status = 'processing';
+            job.progress = progress.percent;
+            activeJobs.set(captureId, job);
+          }
+        })
+        .on('end', () => {
+          console.log('Preview file created successfully');
+          
+          const job = activeJobs.get(captureId);
+          if (job) {
+            job.status = 'ready';
+            job.progress = 100;
+            activeJobs.set(captureId, job);
+          }
+          
+          // Send response with preview URL
+          const previewUrl = `/clips/preview_${captureId}.mp4`;
+          res.json({
+            success: true,
+            captureId,
+            previewUrl
+          });
+        })
+        .on('error', (err) => {
+          console.error('Error creating preview:', err);
+          
+          const job = activeJobs.get(captureId);
+          if (job) {
+            job.status = 'error';
+            job.error = err.message;
+            activeJobs.set(captureId, job);
+          }
+          
+          res.status(500).json({ error: 'Failed to create preview' });
+        })
+        .run();
+    });
+    
+    ytDlp.on('error', (err) => {
+      console.error('Failed to start yt-dlp process:', err);
+      
+      const job = activeJobs.get(captureId);
+      if (job) {
+        job.status = 'error';
+        job.error = err.message;
+        activeJobs.set(captureId, job);
+      }
+      
+      res.status(500).json({ error: 'Failed to capture stream' });
+    });
+    
+    // For long-running downloads, send immediate response
+    // Client will poll for status
+    res.json({
+      success: true,
+      captureId,
+      message: 'Stream capture started'
+    });
+    
+  } catch (err) {
+    console.error('Error capturing stream:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// API endpoint to check capture status
+app.get('/api/capture-status/:captureId', (req, res) => {
+  const { captureId } = req.params;
+  
+  const job = activeJobs.get(capt
