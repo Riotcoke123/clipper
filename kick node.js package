@@ -1,0 +1,27 @@
+{
+  "name": "kick-streamer-tracker",
+  "version": "1.0.0",
+  "description": "Track the status of multiple Kick.com streamers and save the data to a JSON file.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "kick",
+    "streamer",
+    "tracker",
+    "live",
+    "status"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "date-fns": "^2.30.0",
+    "puppeteer": "^20.5.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "timeago-parser": "^1.0.0",
+    "winston": "^3.9.0"
+  }
+}
