@@ -1,0 +1,322 @@
+import React, { useState, useRef, useEffect } from 'react';
+import './VideoClipper.css';
+
+const VideoClipper = () => {
+  // State variables
+  const [streamUrl, setStreamUrl] = useState('');
+  const [platform, setPlatform] = useState('auto');
+  const [quality, setQuality] = useState('high');
+  const [startTime, setStartTime] = useState(0);
+  const [duration, setDuration] = useState(60);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [previewAvailable, setPreviewAvailable] = useState(false);
+  const [clipUrl, setClipUrl] = useState('');
+  const [error, setError] = useState('');
+  const [status, setStatus] = useState('Ready');
+  
+  // Refs
+  const videoPreviewRef = useRef(null);
+  const sliderRef = useRef(null);
+
+  // Auto-detect platform from URL
+  useEffect(() => {
+    if (streamUrl) {
+      if (streamUrl.includes('youtube.com') || streamUrl.includes('youtu.be')) {
+        setPlatform('youtube');
+      } else if (streamUrl.includes('kick.com')) {
+        setPlatform('kick');
+      } else if (streamUrl.includes('parti.com')) {
+        setPlatform('parti');
+      } else {
+        setPlatform('auto');
+      }
+    }
+  }, [streamUrl]);
+
+  // Download stream segment for preview
+  const downloadStream = async () => {
+    if (!streamUrl) {
+      setError('Please enter a stream URL');
+      return;
+    }
+
+    try {
+      setIsDownloading(true);
+      setStatus('Downloading stream segment...');
+      setError('');
+
+      // API call to backend to capture stream
+      const response = await fetch('/api/capture-stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: streamUrl,
+          platform,
+          quality,
+          duration: 240 // Maximum supported duration
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to download stream');
+      }
+
+      const data = await response.json();
+      
+      // Set preview video source
+      if (videoPreviewRef.current) {
+        videoPreviewRef.current.src = data.previewUrl;
+        setPreviewAvailable(true);
+      }
+      
+      setStatus('Stream segment ready for clipping');
+    } catch (err) {
+      setError(`Error downloading stream: ${err.message}`);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  // Create the clip
+  const createClip = async () => {
+    if (!previewAvailable) {
+      setError('Please download the stream first');
+      return;
+    }
+
+    try {
+      setIsProcessing(true);
+      setStatus('Creating clip...');
+      setError('');
+
+      // API call to create the clip
+      const response = await fetch('/api/create-clip', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: streamUrl,
+          platform,
+          quality,
+          startTime,
+          duration,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create clip');
+      }
+
+      const data = await response.json();
+      
+      setStatus('Clip created successfully');
+      
+      // Prompt to upload or download
+      if (window.confirm('Clip created! Would you like to upload it to pomf.lain.la?')) {
+        uploadClip(data.clipId);
+      } else {
+        // Provide download link
+        window.location.href = data.downloadUrl;
+      }
+    } catch (err) {
+      setError(`Error creating clip: ${err.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Upload the clip to pomf.lain.la
+  const uploadClip = async (clipId) => {
+    try {
+      setIsUploading(true);
+      setStatus('Uploading to pomf.lain.la...');
+      setError('');
+
+      // API call to upload the clip
+      const response = await fetch('/api/upload-clip', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          clipId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to upload clip');
+      }
+
+      const data = await response.json();
+      
+      setClipUrl(data.url);
+      setStatus('Upload complete!');
+    } catch (err) {
+      setError(`Error uploading clip: ${err.message}`);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // Copy clip URL to clipboard
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(clipUrl)
+      .then(() => {
+        alert('URL copied to clipboard!');
+      })
+      .catch(err => {
+        console.error('Failed to copy: ', err);
+      });
+  };
+
+  // Update time slider position
+  const updateTimeSlider = (e) => {
+    if (videoPreviewRef.current && previewAvailable) {
+      const position = e.target.value;
+      videoPreviewRef.current.currentTime = position;
+      setStartTime(parseInt(position));
+    }
+  };
+
+  return (
+    <div className="video-clipper-container">
+      <h1>Video Clip Creator</h1>
+      
+      <div className="input-section">
+        <div className="form-group">
+          <label htmlFor="stream-url">Stream URL:</label>
+          <input
+            id="stream-url"
+            type="text"
+            value={streamUrl}
+            onChange={(e) => setStreamUrl(e.target.value)}
+            placeholder="Enter YouTube, Kick, or Parti stream URL"
+            disabled={isProcessing || isDownloading || isUploading}
+          />
+        </div>
+        
+        <div className="form-group">
+          <label htmlFor="platform">Platform:</label>
+          <select
+            id="platform"
+            value={platform}
+            onChange={(e) => setPlatform(e.target.value)}
+            disabled={isProcessing || isDownloading || isUploading}
+          >
+            <option value="auto">Auto-detect</option>
+            <option value="youtube">YouTube</option>
+            <option value="kick">Kick.com</option>
+            <option value="parti">Parti.com</option>
+          </select>
+        </div>
+        
+        <div className="form-group">
+          <label htmlFor="quality">Quality:</label>
+          <select
+            id="quality"
+            value={quality}
+            onChange={(e) => setQuality(e.target.value)}
+            disabled={isProcessing || isDownloading || isUploading}
+          >
+            <option value="low">Low (480p)</option>
+            <option value="medium">Medium (720p)</option>
+            <option value="high">High (1080p)</option>
+            <option value="best">Best Available</option>
+          </select>
+        </div>
+        
+        <button
+          className="download-btn"
+          onClick={downloadStream}
+          disabled={!streamUrl || isProcessing || isDownloading || isUploading}
+        >
+          {isDownloading ? 'Downloading...' : 'Download Stream'}
+        </button>
+      </div>
+      
+      <div className={`preview-section ${previewAvailable ? 'active' : ''}`}>
+        <h2>Preview</h2>
+        <div className="video-container">
+          <video 
+            ref={videoPreviewRef} 
+            controls 
+            controlsList="nodownload"
+            onLoadedMetadata={() => {
+              if (videoPreviewRef.current) {
+                videoPreviewRef.current.currentTime = startTime;
+              }
+            }}
+          >
+            <source src="" type="video/mp4" />
+            Your browser does not support the video tag.
+          </video>
+        </div>
+        
+        <div className="clip-controls">
+          <div className="form-group">
+            <label htmlFor="start-time">Start Time (seconds back):</label>
+            <input
+              id="start-time"
+              type="range"
+              min="0"
+              max="240"
+              value={startTime}
+              onChange={(e) => setStartTime(parseInt(e.target.value))}
+              onInput={updateTimeSlider}
+              ref={sliderRef}
+              disabled={!previewAvailable || isProcessing || isUploading}
+            />
+            <span>{startTime}s</span>
+          </div>
+          
+          <div className="form-group">
+            <label htmlFor="duration">Duration (seconds):</label>
+            <input
+              id="duration"
+              type="range"
+              min="1"
+              max="240"
+              value={duration}
+              onChange={(e) => setDuration(parseInt(e.target.value))}
+              disabled={!previewAvailable || isProcessing || isUploading}
+            />
+            <span>{duration}s</span>
+          </div>
+          
+          <button
+            className="create-btn"
+            onClick={createClip}
+            disabled={!previewAvailable || isProcessing || isUploading}
+          >
+            {isProcessing ? 'Processing...' : 'Create Clip'}
+          </button>
+        </div>
+      </div>
+      
+      {clipUrl && (
+        <div className="result-section">
+          <h2>Clip Created!</h2>
+          <div className="clip-url">
+            <input type="text" value={clipUrl} readOnly />
+            <button onClick={copyToClipboard}>Copy</button>
+          </div>
+          <a href={clipUrl} target="_blank" rel="noopener noreferrer" className="view-btn">
+            View Clip
+          </a>
+        </div>
+      )}
+      
+      <div className="status-bar">
+        <span>{status}</span>
+        {error && <span className="error">{error}</span>}
+      </div>
+    </div>
+  );
+};
+
+export default VideoClipper;
