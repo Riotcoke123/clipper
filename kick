@@ -1,0 +1,299 @@
+/**
+ * Kick Streamer Tracker - Node.js Version
+ * 
+ * This script tracks the status of multiple Kick.com streamers
+ * and saves the data to a JSON file on the desktop.
+ */
+
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const dateParser = require('timeago-parser');
+const { format } = require('date-fns');
+const winston = require('winston');
+
+// Add stealth plugin to avoid detection
+puppeteer.use(StealthPlugin());
+
+// Set up logging
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp({
+      format: 'YYYY-MM-DD HH:mm:ss'
+    }),
+    winston.format.printf(info => `${info.timestamp} - ${info.level.toUpperCase()} - ${info.message}`)
+  ),
+  transports: [
+    new winston.transports.Console()
+  ]
+});
+
+// Configuration
+const usernames = [
+  "waxiest", "loulz", "ac7ionman", "asianandy", "lettyvision", "iholly", 
+  "adrianahlee", "garydavid", "bennymack", "mikesmallsjr", "crazytawn", 
+  "jandro", "n3on", "Deepak", "mskat", "edboys", "floridaboymma", 
+  "dtanmanb", "iduncle", "cristravels", "burgerplanet", "tazo", "billyjohn",
+  "mando", "iceposeidon", "nedx", "kevtv", "andy", "bongbong_irl", 
+  "hamptonbrando", "ddurantv", "boneclinks", "fousey"
+];
+
+// Save to Desktop using path
+const desktopPath = path.join(os.homedir(), 'Desktop');
+const jsonPath = path.join(desktopPath, 'kick_streamers_data.json');
+
+// Helper Functions
+function parseViewers(text) {
+  /**
+   * Converts viewer text like '1.2k' or '1m' into a number.
+   */
+  try {
+    text = text.toLowerCase().replace(",", "").trim();
+    if (text.includes('k')) {
+      return parseInt(parseFloat(text.replace('k', '')) * 1000);
+    } else if (text.includes('m')) {
+      return parseInt(parseFloat(text.replace('m', '')) * 1000000);
+    }
+    return parseInt(text);
+  } catch (error) {
+    return 0;
+  }
+}
+
+function parseLastBroadcast(text) {
+  /**
+   * Converts a 'last_broadcast' string like '5 minutes ago' to seconds.
+   */
+  if (!text || text.toLowerCase() === "not available") {
+    return Number.POSITIVE_INFINITY; // Push to bottom
+  }
+
+  try {
+    // Use timeago-parser to parse relative time expressions
+    const parsedTime = dateParser.parse(text);
+    if (parsedTime) {
+      // Calculate seconds since broadcast
+      const secondsAgo = (Date.now() - parsedTime.getTime()) / 1000;
+      return secondsAgo;
+    }
+  } catch (error) {
+    // Fallback to regex method if dateParser fails
+  }
+
+  // Fallback to the original regex method
+  const text_lower = text.toLowerCase();
+  const timeMap = {
+    "second": 1,
+    "minute": 60,
+    "hour": 3600,
+    "day": 86400,
+    "week": 604800,
+    "month": 2592000 // Assuming 30 days per month for simplicity
+  };
+
+  const match = text_lower.match(/(\d+)\s+(second|minute|hour|day|week|month)s?\s+ago/);
+  if (match) {
+    const value = parseInt(match[1]);
+    const unit = match[2];
+    return value * (timeMap[unit] || 9999999);
+  }
+
+  return Number.POSITIVE_INFINITY;
+}
+
+// Sorting function
+function sortKey(a, b) {
+  // Live streams sorted by viewers, highest first
+  if (a.viewer_count !== undefined && b.viewer_count !== undefined) {
+    return b.viewer_count - a.viewer_count;
+  }
+  // If only one is live, put the live one first
+  else if (a.viewer_count !== undefined) {
+    return -1;
+  }
+  else if (b.viewer_count !== undefined) {
+    return 1;
+  }
+  // Both offline, sort by how recent the last broadcast was
+  else {
+    return parseLastBroadcast(a.last_broadcast) - parseLastBroadcast(b.last_broadcast);
+  }
+}
+
+// Main scraping function
+async function scrapeLoop() {
+  let browser;
+  
+  try {
+    logger.info("🔧 Initializing Puppeteer with stealth...");
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ["--start-maximized", "--no-sandbox"]
+    });
+    logger.info("✅ Browser initialized.");
+    
+    // Create a new page
+    const page = await browser.newPage();
+    
+    // Set viewport
+    await page.setViewport({ width: 1920, height: 1080 });
+    
+    // Set custom headers
+    await page.setExtraHTTPHeaders({
+      'sec-ch-ua': '"Google Chrome";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+      'x-client-token': 'e1393935a959b4020a4491574f6490129f678acdaa92760471263db43487f823'
+    });
+    
+    // Main loop
+    while (true) {
+      logger.info("\n🔄 Starting new scrape cycle...");
+      const results = [];
+      
+      for (const username of usernames) {
+        const url = `https://kick.com/${username}`;
+        logger.info(`\n🔍 Checking ${username} (${url})...`);
+        let data = {};
+        
+        try {
+          // Navigate to the page
+          await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+          
+          // Wait for content to load
+          await page.waitForSelector('#channel-content', { timeout: 20000 });
+          
+          // Check if stream is live
+          let isLive = false;
+          try {
+            const liveBadgeSelector = `#channel-content > div.flex.w-full.min-w-0.max-w-full.flex-col.justify-between.gap-3.pb-3.pt-2.lg\\:flex-row.lg\\:gap-12.lg\\:pb-0.lg\\:pt-0 > div.flex.max-w-full.shrink.grow-0.flex-row.gap-2.overflow-hidden.lg\\:gap-4 > div.shrink-0 > button > div > span`;
+            
+            await page.waitForSelector(liveBadgeSelector, { timeout: 5000 });
+            const liveBadgeText = await page.$eval(liveBadgeSelector, el => el.textContent);
+            
+            if (liveBadgeText && liveBadgeText.toLowerCase().includes('live')) {
+              isLive = true;
+              logger.info("🎥 Stream is LIVE.");
+            }
+          } catch (error) {
+            logger.info("📴 Stream is OFFLINE.");
+          }
+          
+          // Get username (from display if possible)
+          let displayName;
+          try {
+            displayName = await page.$eval("#channel-username", el => el.textContent.trim());
+          } catch (error) {
+            displayName = username;
+          }
+          
+          // Get profile photo
+          let profilePhoto;
+          try {
+            if (isLive) {
+              profilePhoto = await page.$eval("#channel-avatar img", el => el.getAttribute("src"));
+            } else {
+              profilePhoto = await page.$eval("#channel-content img.rounded-full", el => el.getAttribute("src"));
+            }
+          } catch (error) {
+            profilePhoto = "Not Found";
+          }
+          
+          // If LIVE
+          if (isLive) {
+            try {
+              const titleSelector = `#channel-content > div.flex.w-full.min-w-0.max-w-full.flex-col.justify-between.gap-3.pb-3.pt-2.lg\\:flex-row.lg\\:gap-12.lg\\:pb-0.lg\\:pt-0 > div.flex.max-w-full.shrink.grow-0.flex-row.gap-2.overflow-hidden.lg\\:gap-4 > div.flex.max-w-full.grow.flex-col.gap-1.overflow-hidden > div.flex.min-w-0.max-w-full.shrink.gap-1.overflow-hidden > span`;
+              const viewersSelector = `#channel-content > div.flex.w-full.min-w-0.max-w-full.flex-col.justify-between.gap-3.pb-3.pt-2.lg\\:flex-row.lg\\:gap-12.lg\\:pb-0.lg\\:pt-0 > div.flex.shrink-0.flex-col.items-end.gap-2 > div.flex.items-center.gap-2.self-end.py-0\\.5 > div > span > span.relative.tabular-nums`;
+              
+              const title = await page.$eval(titleSelector, el => el.textContent.trim());
+              const viewersText = await page.$eval(viewersSelector, el => el.textContent.trim());
+              const viewerCount = parseViewers(viewersText);
+              
+              data = {
+                username: displayName,
+                profile_photo: profilePhoto,
+                title: title,
+                viewer_count: viewerCount
+              };
+            } catch (error) {
+              data = {
+                username: displayName,
+                profile_photo: profilePhoto,
+                title: "N/A",
+                viewer_count: 0
+              };
+            }
+          } 
+          // If OFFLINE
+          else {
+            try {
+              const lastBroadcastSelector = `#channel-content > div.flex.w-full.min-w-0.max-w-full.flex-col.justify-between.gap-3.pb-3.pt-2.lg\\:flex-row.lg\\:gap-12.lg\\:pb-0.lg\\:pt-0 > div.flex.max-w-full.shrink.grow-0.flex-row.gap-2.overflow-hidden.lg\\:gap-4 > div.flex.max-w-full.grow.flex-col.gap-1.overflow-hidden > span:nth-child(3) > span`;
+              
+              const lastBroadcast = await page.$eval(lastBroadcastSelector, el => el.textContent.trim());
+              
+              data = {
+                username: displayName,
+                profile_photo: profilePhoto,
+                last_broadcast: lastBroadcast
+              };
+            } catch (error) {
+              data = {
+                username: displayName,
+                profile_photo: profilePhoto,
+                last_broadcast: "Not Available"
+              };
+            }
+          }
+          
+        } catch (error) {
+          if (error.name === 'TimeoutError') {
+            logger.warning(`⏰ Timeout loading ${username}`);
+          } else {
+            logger.error(`⚠️ Error processing ${username}: ${error.message}`);
+          }
+          continue;
+        }
+        
+        results.push(data);
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Sleep 2 seconds between requests
+      }
+      
+      // Sort results
+      results.sort(sortKey);
+      
+      // Save JSON
+      try {
+        fs.writeFileSync(jsonPath, JSON.stringify(results, null, 2), 'utf8');
+        logger.info(`\n💾 Results saved to ${jsonPath}`);
+      } catch (error) {
+        logger.error(`❌ Failed to save JSON: ${error.message}`);
+      }
+      
+      logger.info("⏳ Waiting 60 seconds...\n");
+      await new Promise(resolve => setTimeout(resolve, 60000)); // Sleep 60 seconds
+    }
+  } catch (error) {
+    logger.error(`❌ Fatal error: ${error.message}`);
+  } finally {
+    if (browser) {
+      await browser.close();
+      logger.info("✅ Browser closed.");
+    }
+  }
+}
+
+// Run the main function
+(async () => {
+  try {
+    await scrapeLoop();
+  } catch (error) {
+    logger.error(`🛑 Script error: ${error.message}`);
+  }
+})();
