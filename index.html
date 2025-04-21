@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Livestream Clip Creator</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.0/nouislider.min.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="bg-dark text-light">
+  <div class="container-fluid">
+    <div class="row">
+      <!-- Sidebar -->
+      <div class="col-md-3 col-lg-2 sidebar p-0">
+        <div class="sidebar-header p-3">
+          <h3>Clip Creator</h3>
+        </div>
+        <div class="nav-tabs-wrapper">
+          <ul class="nav nav-tabs" id="sidebar-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="streamers-tab" data-bs-toggle="tab" data-bs-target="#streamers" type="button" role="tab" aria-controls="streamers" aria-selected="true">
+                <i class="fas fa-video"></i> Live
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="clips-tab" data-bs-toggle="tab" data-bs-target="#clips" type="button" role="tab" aria-controls="clips" aria-selected="false">
+                <i class="fas fa-cut"></i> Clips
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="jobs-tab" data-bs-toggle="tab" data-bs-target="#jobs" type="button" role="tab" aria-controls="jobs" aria-selected="false">
+                <i class="fas fa-tasks"></i> Jobs
+              </button>
+            </li>
+          </ul>
+        </div>
+        
+        <div class="tab-content p-3" id="sidebar-tab-content">
+          <!-- Streamers Tab -->
+          <div class="tab-pane fade show active" id="streamers" role="tabpanel" aria-labelledby="streamers-tab">
+            <div class="mb-3 d-flex justify-content-between align-items-center">
+              <h5>Live Streamers</h5>
+              <button id="refresh-streamers" class="btn btn-sm btn-primary">
+                <i class="fas fa-sync"></i> Refresh
+              </button>
+            </div>
+            
+            <div class="platform-filters mb-3">
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="filter-kick" value="kick" checked>
+                <label class="form-check-label" for="filter-kick">Kick</label>
+              </div>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="filter-youtube" value="youtube" checked>
+                <label class="form-check-label" for="filter-youtube">YouTube</label>
+              </div>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="filter-twitch" value="twitch" checked>
+                <label class="form-check-label" for="filter-twitch">Twitch</label>
+              </div>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="filter-parti" value="parti" checked>
+                <label class="form-check-label" for="filter-parti">Parti</label>
+              </div>
+            </div>
+            
+            <div class="input-group mb-3">
+              <input type="text" id="streamer-search" class="form-control" placeholder="Search streamers...">
+              <button class="btn btn-outline-secondary" type="button" id="clear-search">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+            
+            <div id="live-streamers-list" class="streamers-list">
+              <!-- Live streamers will be loaded here -->
+              <div class="text-center py-4">
+                <div class="spinner-border text-primary" role="status">
+                  <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2">Loading streamers...</p>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Clips Tab -->
+          <div class="tab-pane fade" id="clips" role="tabpanel" aria-labelledby="clips-tab">
+            <div class="mb-3 d-flex justify-content-between align-items-center">
+              <h5>My Clips</h5>
+              <button id="refresh-clips" class="btn btn-sm btn-primary">
+                <i class="fas fa-sync"></i> Refresh
+              </button>
+            </div>
+            
+            <div class="input-group mb-3">
+              <input type="text" id="clip-search" class="form-control" placeholder="Search clips...">
+              <button class="btn btn-outline-secondary" type="button" id="clear-clip-search">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+            
+            <div id="clips-list" class="clips-list">
+              <!-- Clips will be loaded here -->
+              <div class="text-center py-4">
+                <div class="spinner-border text-primary" role="status">
+                  <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2">Loading clips...</p>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Jobs Tab -->
+          <div class="tab-pane fade" id="jobs" role="tabpanel" aria-labelledby="jobs-tab">
+            <div class="mb-3">
+              <h5>Active Jobs</h5>
+            </div>
+            
+            <div id="jobs-list" class="jobs-list">
+              <!-- Jobs will be loaded here -->
+              <div class="text-center py-4">
+                <p>No active jobs</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Main Content -->
+      <div class="col-md-9 col-lg-10 main-content p-3">
+        <!-- Welcome Screen -->
+        <div id="welcome-screen">
+          <div class="card bg-dark border-secondary">
+            <div class="card-body text-center">
+              <h2 class="card-title mb-4">Welcome to Livestream Clip Creator</h2>
+              <p class="card-text">Select a live streamer from the sidebar to start capturing and creating clips.</p>
+              <div class="mt-4">
+                <i class="fas fa-arrow-left fa-3x text-primary"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Capture View -->
+        <div id="capture-view" class="d-none">
+          <div class="card bg-dark border-secondary">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <h5 id="capture-streamer-name">Streamer Name</h5>
+              <div>
+                <span class="badge bg-danger" id="capture-platform">Platform</span>
+                <button id="close-capture" class="btn btn-sm btn-outline-danger ms-2">
+                  <i class="fas fa-times"></i>
+                </button>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="capture-info mb-3">
+                <p id="capture-title" class="mb-1">Stream Title</p>
+                <div class="d-flex align-items-center">
+                  <i class="fas fa-eye me-1"></i>
+                  <span id="capture-viewers">0</span> viewers
+                </div>
+              </div>
+              
+              <div class="capture-controls">
+                <div class="row mb-3">
+                  <div class="col-md-6">
+                    <div class="form-group">
+                      <label for="capture-duration">Capture Duration (seconds):</label>
+                      <input type="number" id="capture-duration" class="form-control" min="10" max="240" value="240">
+                      <small class="form-text text-muted">Maximum: 240 seconds (4 minutes)</small>
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="d-grid">
+                  <button id="start-capture" class="btn btn-lg btn-primary">
+                    <i class="fas fa-video"></i> Start Capturing Stream
+                  </button>
+                </div>
+              </div>
+              
+              <!-- Capture Progress -->
+              <div id="capture-progress-container" class="mt-4 d-none">
+                <h5>Capturing Stream...</h5>
+                <div class="progress mb-2">
+                  <div id="capture-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                </div>
+                <p id="capture-progress-text">0%</p>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Clip Editor (shows after capture completion) -->
+          <div id="clip-editor" class="card bg-dark mt-3 border-secondary d-none">
+            <div class="card-header">
+              <h5>Create Clip</h5>
+            </div>
+            <div class="card-body">
+              <div class="form-group mb-3">
+                <label for="clip-title">Clip Title:</label>
+                <input type="text" id="clip-title" class="form-control" placeholder="Enter a title for your clip">
+              </div>
+              
+              <div class="preview-section mb-3">
+                <h6>Preview Frames</h6>
+                <button id="generate-previews" class="btn btn-sm btn-secondary mb-2">
+                  <i class="fas fa-images"></i> Generate Preview Frames
+                </button>
+                <div id="preview-frames-container" class="d-flex flex-wrap preview-frames-grid">
+                  <!-- Preview frames will be loaded here -->
+                  <div class="text-center py-4 w-100">
+                    <p>Generate preview frames to help with time selection</p>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Preview Player (when a frame is clicked) -->
+              <div id="preview-player" class="d-none mb-3">
+                <h6>Preview at Selected Position</h6>
+                <div class="position-relative">
+                  <img id="preview-image" src="" alt="Frame preview" class="img-fluid w-100">
+                  <div class="preview-time-indicator">
+                    <span id="preview-time">0:00</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="time-selector mb-3">
+                <h6>Select Clip Time Range:</h6>
+                <div id="time-slider" class="mt-3 mb-1"></div>
+                <div class="d-flex justify-content-between mt-1">
+                  <span id="time-start">0:00</span>
+                  <span id="time-end">4:00</span>
+                </div>
+              </div>
+              
+              <div class="row">
+                <div class="col-md-6">
+                  <div class="form-group">
+                    <label for="clip-start-time">Start Time (seconds):</label>
+                    <input type="number" id="clip-start-time" class="form-control" min="0" value="0" step="0.1">
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <div class="form-group">
+                    <label for="clip-duration">Clip Duration (seconds):</label>
+                    <input type="number" id="clip-duration" class="form-control" min="1" max="240" value="30" step="0.1">
+                  </div>
+                </div>
+              </div>
+              
+              <div class="d-grid mt-3">
+                <button id="create-clip" class="btn btn-lg btn-success">
+                  <i class="fas fa-cut"></i> Create Clip
+                </button>
+              </div>
+              
+              <!-- Clip Progress -->
+              <div id="clip-progress-container" class="mt-4 d-none">
+                <h5>Creating Clip...</h5>
+                <div class="progress mb-2">
+                  <div id="clip-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" style="width: 0%"></div>
+                </div>
+                <p id="clip-progress-text">0%</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Clip View (shows after clip creation) -->
+        <div id="clip-view" class="d-none">
+          <div class="card bg-dark border-secondary">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <h5 id="clip-view-title">Clip Title</h5>
+              <button id="close-clip-view" class="btn btn-sm btn-outline-danger">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+            <div class="card-body">
+              <div class="row">
+                <div class="col-md-8">
+                  <video id="clip-player" controls class="img-fluid w-100 mb-3">
+                    <source id="clip-source" src="" type="video/mp4">
+                    Your browser does not support the video tag.
+                  </video>
+                </div>
+                <div class="col-md-4">
+                  <div class="clip-info">
+                    <div class="mb-3">
+                      <h6>Clip Details</h6>
+                      <p class="mb-1"><strong>Platform:</strong> <span id="clip-view-platform">Platform</span></p>
+                      <p class="mb-1"><strong>Streamer:</strong> <span id="clip-view-streamer">Streamer</span></p>
+                      <p class="mb-1"><strong>Duration:</strong> <span id="clip-view-duration">0:00</span></p>
+                      <p class="mb-1"><strong>Created:</strong> <span id="clip-view-created">Date</span></p>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <h6>Share Clip</h6>
+                      <div class="input-group">
+                        <input type="text" id="clip-url" class="form-control" readonly>
+                        <button class="btn btn-outline-primary" type="button" id="copy-url">
+                          <i class="fas fa-copy"></i>
+                        </button>
+                      </div>
+                      <div id="copy-success" class="text-success mt-1 d-none">
+                        <i class="fas fa-check"></i> URL copied to clipboard
+                      </div>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                      <button id="upload-clip" class="btn btn-primary">
+                        <i class="fas fa-cloud-upload-alt"></i> Upload to pomf.lain.la
+                      </button>
+                      <button id="delete-clip" class="btn btn-danger">
+                        <i class="fas fa-trash-alt"></i> Delete Clip
+                      </button>
+                    </div>
+                    
+                    <!-- Upload Progress -->
+                    <div id="upload-progress-container" class="mt-3 d-none">
+                      <h6>Uploading...</h6>
+                      <div class="progress mb-2">
+                        <div id="upload-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-info" role="progressbar" style="width: 0%"></div>
+                      </div>
+                      <p id="upload-progress-text">0%</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Toast Notifications -->
+  <div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="toast-notification" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+      <div class="toast-header">
+        <strong class="me-auto" id="toast-title">Notification</strong>
+        <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+      <div class="toast-body" id="toast-message">
+        Message
+      </div>
+    </div>
+  </div>
+  
+  <!-- API Key Modal -->
+  <div class="modal fade" id="api-key-modal" tabindex="-1" aria-labelledby="api-key-modal-label" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content bg-dark text-light">
+        <div class="modal-header">
+          <h5 class="modal-title" id="api-key-modal-label">Enter API Key</h5>
+        </div>
+        <div class="modal-body">
+          <p>Please enter your API key to access the Clip Creator.</p>
+          <div class="form-group">
+            <label for="api-key-input">API Key:</label>
+            <input type="password" id="api-key-input" class="form-control" placeholder="Enter API key">
+          </div>
+          <div id="api-key-error" class="text-danger mt-2 d-none">
+            Invalid API key. Please try again.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="save-api-key" class="btn btn-primary">Save API Key</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Delete Confirmation Modal -->
+  <div class="modal fade" id="delete-confirm-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content bg-dark text-light">
+        <div class="modal-header">
+          <h5 class="modal-title">Confirm Deletion</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p>Are you sure you want to delete this clip? This action cannot be undone.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="confirm-delete" class="btn btn-danger">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Scripts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.0/nouislider.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/wnumb/1.2.0/wNumb.min.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
