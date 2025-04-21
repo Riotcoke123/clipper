@@ -1051,7 +1051,9 @@ function getAllLiveStreamers() {
     return bCount - aCount;
   });
 }
+## Part 8: Clipping Functions
 
+```javascript
 /**
  * Clipping Functions
  */
@@ -1478,3 +1480,149 @@ async function createThumbnail(videoFile, thumbnailFile, timePosition) {
 // Generate preview frames for clip selection UI
 async function generatePreviewFrames(clipId, numFrames = 10) {
   logger.info(`Generating ${numFrames} preview frames for ${clipId}`);
+  
+  try {
+    // Get job info
+    const job = activeJobs.get(clipId);
+    if (!job) {
+      throw new Error(`Clip job ${clipId} not found`);
+    }
+    
+    // Check if segment is captured
+    if (job.status !== 'captured') {
+      throw new Error(`Segment for clip ${clipId} is not captured yet (status: ${job.status})`);
+    }
+    
+    const videoFile = job.outputFile;
+    const previewDir = path.join(tempDir, `preview_${clipId}`);
+    
+    // Create preview directory
+    await fs.ensureDir(previewDir);
+    
+    // Use FFmpeg to extract frames
+    return new Promise((resolve, reject) => {
+      const outputPattern = path.join(previewDir, 'frame_%04d.jpg');
+      
+      const ffmpegArgs = [
+        '-hide_banner',
+        '-loglevel', 'error',
+        '-i', videoFile,
+        '-vf', `fps=1/${Math.floor(config.maxClipDuration / numFrames)}`,
+        '-q:v', '3',
+        '-y',
+        outputPattern
+      ];
+      
+      const ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
+      
+      ffmpegProcess.on('close', (code) => {
+        if (code === 0) {
+          // Get list of generated frames
+          fs.readdir(previewDir)
+            .then(files => {
+              const frameFiles = files
+                .filter(file => file.startsWith('frame_') && file.endsWith('.jpg'))
+                .sort()
+                .map(file => path.join(previewDir, file));
+              
+              logger.info(`Generated ${frameFiles.length} preview frames for ${clipId}`);
+              
+              // Update job
+              job.previewFrames = frameFiles;
+              activeJobs.set(clipId, job);
+              
+              resolve(frameFiles);
+            })
+            .catch(error => {
+              reject(new Error(`Error reading preview frames: ${error.message}`));
+            });
+        } else {
+          reject(new Error(`FFmpeg exited with code ${code}`));
+        }
+      });
+      
+      ffmpegProcess.on('error', (error) => {
+        reject(new Error(`FFmpeg error: ${error.message}`));
+      });
+    });
+  } catch (error) {
+    logger.error(`Error generating preview frames: ${error.message}`);
+    throw error;
+  }
+}
+
+// Upload clip to pomf.lain.la
+async function uploadClip(clipId) {
+  logger.info(`Uploading clip ${clipId} to pomf.lain.la`);
+  
+  try {
+    // Get job info
+    const job = activeJobs.get(clipId);
+    if (!job) {
+      throw new Error(`Clip job ${clipId} not found`);
+    }
+    
+    // Check if clip is created
+    if (!job.clipFile || job.status !== 'completed') {
+      throw new Error(`Clip ${clipId} is not ready for upload (status: ${job.status})`);
+    }
+    
+    // Update job status
+    job.status = 'uploading';
+    job.progress = 0;
+    activeJobs.set(clipId, job);
+    
+    // Create form data
+    const formData = new FormData();
+    formData.append('files[]', fs.createReadStream(job.clipFile));
+    
+    // Upload to pomf.lain.la
+    const response = await axios.post(config.uploadEndpoint, formData, {
+      headers: {
+        ...formData.getHeaders(),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      },
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      onUploadProgress: (progressEvent) => {
+        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        
+        // Update job progress
+        job.progress = percentCompleted;
+        activeJobs.set(clipId, job);
+      }
+    });
+    
+    // Check response
+    if (response.data && response.data.success) {
+      const uploadedUrl = `https://pomf.lain.la/${response.data.files[0].url}`;
+      
+      logger.info(`Successfully uploaded clip ${clipId} to ${uploadedUrl}`);
+      
+      // Update job
+      job.status = 'uploaded';
+      job.progress = 100;
+      job.uploadedUrl = uploadedUrl;
+      activeJobs.set(clipId, job);
+      
+      return {
+        clipId,
+        url: uploadedUrl
+      };
+    } else {
+      throw new Error(`Upload failed: ${JSON.stringify(response.data)}`);
+    }
+  } catch (error) {
+    logger.error(`Error uploading clip: ${error.message}`);
+    
+    // Update job status
+    const job = activeJobs.get(clipId);
+    if (job) {
+      job.status = 'error';
+      job.error = error.message;
+      activeJobs.set(clipId, job);
+    }
+    
+    throw error;
+  }
+}
