@@ -3,7 +3,7 @@ import json
 import time
 from datetime import datetime
 
-user_ids = [348242, 464860, 465731, 463000, 350101]
+user_ids = [348242, 464860, 465731, 463000, 350101, 352176]
 
 base_livestream_url = "https://api-backend.parti.com/parti_v2/profile/get_livestream_channel_info/"
 base_profile_url = "https://api-backend.parti.com/parti_v2/profile/user_profile/"
@@ -147,4 +147,3 @@ while True:
         print(f"Failed to write file: {e}")
 
     time.sleep(60)
-
