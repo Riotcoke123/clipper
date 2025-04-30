@@ -3,7 +3,7 @@ import json
 import time
 from datetime import datetime
 
-user_ids = [348242, 464860, 465731, 463000, 350101, 352438]
+user_ids = [348242, 464860, 465731, 463000, 350101]
 
 base_livestream_url = "https://api-backend.parti.com/parti_v2/profile/get_livestream_channel_info/"
 base_profile_url = "https://api-backend.parti.com/parti_v2/profile/user_profile/"
