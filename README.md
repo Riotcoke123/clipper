@@ -9,7 +9,6 @@
 
 <div class="container">
     <header>
-        <img src="https://raw.githubusercontent.com/Riotcoke123/clipper/main/public/logo.png" alt="Clipper Logo" class="logo">
         <h1>Clipper</h1>
         <p>A high-performance Node.js service for real-time stream capturing and automated video clipping.</p>
         <div style="margin-top: 20px;">
