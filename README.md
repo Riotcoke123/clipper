@@ -1,149 +1,91 @@
-# Video Clip Creator
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-A web-based tool for creating clips from live streams on YouTube, Kick.com, and Parti.com and uploading them to pomf.lain.la.
+</head>
+<body>
 
-![Video Clipper Screenshot](screenshot.png)
+<div class="container">
+    <header>
+        <img src="https://raw.githubusercontent.com/Riotcoke123/clipper/main/public/logo.png" alt="Clipper Logo" class="logo">
+        <h1>Clipper</h1>
+        <p>A high-performance Node.js service for real-time stream capturing and automated video clipping.</p>
+        <div style="margin-top: 20px;">
+            <span class="badge">Node.js</span>
+            <span class="badge">Express</span>
+            <span class="badge">FFmpeg</span>
+            <span class="badge">yt-dlp</span>
+        </div>
+    </header>
+    <section id="overview">
+        <h2>🚀 Overview</h2>
+        <p><b>Clipper</b> is a robust backend engine designed to automate the process of capturing segments from live streams. By integrating industry-standard tools like <code>yt-dlp</code> and <code>FFmpeg</code>, it provides a seamless workflow from live ingestion to cloud-ready distribution.</p>
+        <ul>
+            <li><b>Dynamic Capturing:</b> Ingest live content across various quality profiles.</li>
+            <li><b>Automated Transcoding:</b> Instant conversion to web-optimized H.264 formats.</li>
+            <li><b>Cloud Integration:</b> One-click uploads to anonymous hosting services.</li>
+        </ul>
+    </section>
+    <section id="tech-stack">
+        <h2>🛠 Tech Stack</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Core Technology</th>
+                    <th>Implementation</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><b>Runtime</b></td>
+                    <td>Node.js (v16+)</td>
+                </tr>
+                <tr>
+                    <td><b>Processing</b></td>
+                    <td>FFmpeg (libx264/aac)</td>
+                </tr>
+                <tr>
+                    <td><b>Ingestion</b></td>
+                    <td>yt-dlp (Daily updates)</td>
+                </tr>
+                <tr>
+                    <td><b>Storage</b></td>
+                    <td>Local Buffer with TTL Cleanup</td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+    <section id="installation">
+        <h2>📦 Installation</h2>
+        <p>Ensure you have <b>FFmpeg</b> and <b>yt-dlp</b> installed on your host system before proceeding.</p>
+        <pre><code># Clone the repo
+git clone https://github.com/Riotcoke123/clipper.git
 
-## Features
+# Install dependencies
+npm install
 
-- Create clips up to 4 minutes long from live streams
-- Support for YouTube, Kick.com, and Parti.com
-- Visual preview before creating clips
-- Custom time window selection
-- Multiple quality options
-- Automatic upload to pomf.lain.la
-- MP4 format output
-- Mobile-friendly interface
+# Set up environment variables
+cp .env.example .env
 
-## Technologies Used
+# Fire up the engine
+npm start</code></pre>
+    </section>
+    <section id="api">
+        <h2>🛰 API Reference</h2>
+        <h3>POST /api/capture-stream</h3>
+        <p>Initiates a background capture job.</p>
+        <pre><code>{
+  "url": "https://twitch.tv/example",
+  "quality": "high",
+  "duration": 60
+}</code></pre>
+        <h3>GET /api/capture-status/:captureId</h3>
+        <p>Retrieves real-time progress and generated preview URLs.</p>
+    </section>
 
-- **Frontend**: React.js with modern CSS
-- **Backend**: Node.js with Express
-- **Video Processing**: FFmpeg
-- **Stream Capture**: yt-dlp
-- **Deployment**: Docker support for easy hosting
+</div>
 
-## Installation
-
-### Prerequisites
-
-- Node.js (v14 or later)
-- FFmpeg
-- yt-dlp
-
-### Setup
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/video-clip-creator.git
-   cd video-clip-creator
-   ```
-
-2. Install dependencies:
-   ```bash
-   # Install backend dependencies
-   npm install
-   
-   # Install frontend dependencies
-   cd client
-   npm install
-   cd ..
-   ```
-
-3. Create required directories:
-   ```bash
-   mkdir -p temp public/clips
-   ```
-
-4. Create a `.env` file with your configuration:
-   ```
-   PORT=5000
-   NODE_ENV=development
-   ```
-
-## Usage
-
-### Development Mode
-
-1. Start the backend server:
-   ```bash
-   npm run server
-   ```
-
-2. In another terminal, start the frontend:
-   ```bash
-   cd client
-   npm start
-   ```
-
-3. Access the application at `http://localhost:3000`
-
-### Production Mode
-
-1. Build the frontend:
-   ```bash
-   cd client
-   npm run build
-   cd ..
-   ```
-
-2. Start the production server:
-   ```bash
-   npm start
-   ```
-
-3. Access the application at `http://localhost:5000`
-
-## Docker Deployment
-
-You can use Docker to simplify deployment:
-
-```bash
-# Build the Docker image
-docker build -t video-clip-creator .
-
-# Run the container
-docker run -p 5000:5000 video-clip-creator
-```
-
-## Using the Application
-
-1. Enter the URL of a live stream from YouTube, Kick.com, or Parti.com
-2. Select the desired quality level
-3. Click "Download Stream" to capture a segment
-4. Use the preview to select the exact portion you want to clip
-5. Adjust the start time and duration using the sliders
-6. Click "Create Clip" to generate your clip
-7. The clip will be automatically uploaded to pomf.lain.la
-8. Copy the provided URL to share your clip
-
-## API Endpoints
-
-- `POST /api/capture-stream` - Captures a segment of a live stream
-- `GET /api/capture-status/:captureId` - Checks the status of a capture
-- `POST /api/create-clip` - Creates a clip from a captured stream
-- `POST /api/upload-clip` - Uploads a clip to pomf.lain.la
-
-## Limitations
-
-- Maximum clip duration is 4 minutes (240 seconds)
-- pomf.lain.la has a file size limit of 1 GiB
-- Streaming sites may have their own limitations or restrictions
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Disclaimer
-
-This tool is for personal use only. Always respect the terms of service of the platforms you interact with and ensure you have the necessary permissions to clip and share content.
+</body>
+</html>
