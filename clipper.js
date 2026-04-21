@@ -26,8 +26,19 @@ const MAX_CAPTURE_DURATION = Number(process.env.MAX_CAPTURE_DURATION || 240);
 // How long (ms) to keep completed/errored jobs in memory before cleanup
 const JOB_TTL_MS = Number(process.env.JOB_TTL_SECONDS || 3600) * 1000;
 
-// pomf.lain.la upload endpoint
-const POMF_UPLOAD_URL = process.env.POMF_UPLOAD_URL || 'https://pomf.lain.la/upload.php';
+// catbox.moe upload endpoint (anonymous — no userhash required)
+const CATBOX_UPLOAD_URL = process.env.CATBOX_UPLOAD_URL || 'https://catbox.moe/user/api.php';
+
+// catbox.moe max file size: 200 MB
+const CATBOX_MAX_BYTES = 200 * 1024 * 1024;
+
+// buzzheavier.com upload base URL (anonymous PUT upload)
+// Usage: PUT https://w.buzzheavier.com/<filename>  with raw file body
+const BUZZHEAVIER_UPLOAD_BASE = process.env.BUZZHEAVIER_UPLOAD_BASE || 'https://w.buzzheavier.com';
+
+// fileditch.com upload endpoint (anonymous raw-body PUT, returns JSON { files: [{ url }] })
+// Usage: PUT https://new.fileditch.com/upload.php?filename=<filename>  with raw file body
+const FILEDITCH_UPLOAD_URL = process.env.FILEDITCH_UPLOAD_URL || 'https://new.fileditch.com/upload.php';
 
 /* ==========================================================================
    DIRECTORIES
@@ -332,15 +343,33 @@ app.post('/api/create-clip', async (req, res) => {
 
 /* ------------------------------------------------------------------
    POST /api/upload-clip
-   Uploads a finished clip to pomf.lain.la and returns the public URL.
-   Body: { clipId }
+   Uploads a finished clip to catbox.moe, buzzheavier.com, or
+   fileditch.com and returns the public URL.
+   Body: { clipId, site? }
+         site = 'catbox' (default) | 'buzzheavier' | 'fileditch'
+
+   catbox.moe (max 200 MB):
+     POST https://catbox.moe/user/api.php
+     reqtype=fileupload  fileToUpload=<file data>
+     → responds with plain-text URL
+
+   buzzheavier.com (anonymous):
+     PUT https://w.buzzheavier.com/<filename>  (raw file body)
+     → responds with JSON { url } or plain-text URL
+
+   fileditch.com (anonymous):
+     PUT https://new.fileditch.com/upload.php?filename=<filename>  (raw file body)
+     → responds with JSON { files: [{ url }] }
    ------------------------------------------------------------------ */
 app.post('/api/upload-clip', async (req, res) => {
   try {
-    const { clipId } = req.body;
+    const { clipId, site = 'catbox' } = req.body;
 
     if (!clipId) {
       return res.status(400).json({ error: 'clipId is required.' });
+    }
+    if (!['catbox', 'buzzheavier', 'fileditch'].includes(site)) {
+      return res.status(400).json({ error: 'site must be "catbox", "buzzheavier", or "fileditch".' });
     }
 
     // Find the job that owns this clipId
@@ -361,43 +390,131 @@ app.post('/api/upload-clip', async (req, res) => {
       return res.status(500).json({ error: 'Clip file missing on disk.' });
     }
 
+    const { size: fileSize } = fs.statSync(targetJob.clipFile);
+    const fileSizeMB = (fileSize / 1024 / 1024).toFixed(1);
+
+    // catbox.moe enforces a 200 MB hard limit
+    if (site === 'catbox' && fileSize > CATBOX_MAX_BYTES) {
+      return res.status(413).json({
+        error: `Clip exceeds catbox.moe's 200 MB limit (file is ${fileSizeMB} MB). Try site=buzzheavier or site=fileditch instead.`,
+      });
+    }
+
     targetJob.status   = 'uploading';
     targetJob.progress = 0;
 
-    console.log(`[upload] Uploading clip ${clipId} to pomf.lain.la`);
+    console.log(`[upload] Uploading clip ${clipId} to ${site} (${fileSizeMB} MB)`);
 
-    const form = new FormData();
-    form.append('files[]', fs.createReadStream(targetJob.clipFile), {
-      filename:    `clip_${clipId}.mp4`,
-      contentType: 'video/mp4',
-    });
+    let uploadUrl;
 
-    const pomfRes = await axios.post(POMF_UPLOAD_URL, form, {
-      headers: form.getHeaders(),
-      maxContentLength: Infinity,
-      maxBodyLength:    Infinity,
-      onUploadProgress: (evt) => {
-        if (evt.total) {
-          targetJob.progress = Math.round((evt.loaded / evt.total) * 100);
+    /* ── catbox.moe ──────────────────────────────────────────────── */
+    if (site === 'catbox') {
+      // Anonymous upload: omit userhash
+      // reqtype=fileupload  fileToUpload=<file data>
+      const form = new FormData();
+      form.append('reqtype', 'fileupload');
+      form.append('fileToUpload', fs.createReadStream(targetJob.clipFile), {
+        filename:    `clip_${clipId}.mp4`,
+        contentType: 'video/mp4',
+      });
+
+      const catboxRes = await axios.post(CATBOX_UPLOAD_URL, form, {
+        headers: form.getHeaders(),
+        maxContentLength: Infinity,
+        maxBodyLength:    Infinity,
+        onUploadProgress: (evt) => {
+          if (evt.total) {
+            targetJob.progress = Math.round((evt.loaded / evt.total) * 100);
+          }
+        },
+      });
+
+      // catbox returns the plain-text URL, e.g. https://files.catbox.moe/xxxxxx.mp4
+      uploadUrl = (catboxRes.data || '').toString().trim();
+      if (!uploadUrl.startsWith('https://')) {
+        throw new Error(`catbox.moe returned an unexpected response: ${uploadUrl}`);
+      }
+
+    /* ── buzzheavier.com ─────────────────────────────────────────── */
+    } else if (site === 'buzzheavier') {
+      // Anonymous PUT upload — equivalent to:
+      //   curl -#o - -T "clip.mp4" "https://w.buzzheavier.com/clip.mp4"
+      const filename   = `clip_${clipId}.mp4`;
+      const uploadEndpoint = `${BUZZHEAVIER_UPLOAD_BASE}/${filename}`;
+
+      const buzzRes = await axios.put(
+        uploadEndpoint,
+        fs.createReadStream(targetJob.clipFile),
+        {
+          headers: {
+            'Content-Type':   'video/mp4',
+            'Content-Length': fileSize,
+          },
+          maxContentLength: Infinity,
+          maxBodyLength:    Infinity,
+          onUploadProgress: (evt) => {
+            if (evt.total) {
+              targetJob.progress = Math.round((evt.loaded / evt.total) * 100);
+            }
+          },
         }
-      },
-    });
+      );
 
-    // pomf returns: { success, files: [{ url, name, hash, size }] }
-    const pomfData = pomfRes.data;
+      // Response may be JSON { url } or plain-text URL
+      const raw = buzzRes.data;
+      if (raw && typeof raw === 'object' && raw.url) {
+        uploadUrl = raw.url.toString().trim();
+      } else {
+        uploadUrl = (raw || '').toString().trim();
+      }
 
-    if (!pomfData.success || !pomfData.files?.length) {
-      throw new Error('pomf.lain.la returned an unexpected response.');
+      if (!uploadUrl.startsWith('https://')) {
+        throw new Error(`buzzheavier.com returned an unexpected response: ${uploadUrl}`);
+      }
+
+    /* ── fileditch.com ───────────────────────────────────────────── */
+    } else {
+      // Anonymous raw-body PUT — equivalent to:
+      //   curl -T clip.mp4 "https://new.fileditch.com/upload.php?filename=clip.mp4"
+      const filename = `clip_${clipId}.mp4`;
+      const uploadEndpoint = `${FILEDITCH_UPLOAD_URL}?filename=${encodeURIComponent(filename)}`;
+
+      const ditchRes = await axios.put(
+        uploadEndpoint,
+        fs.createReadStream(targetJob.clipFile),
+        {
+          headers: {
+            'Content-Type':   'video/mp4',
+            'Content-Length': fileSize,
+          },
+          maxContentLength: Infinity,
+          maxBodyLength:    Infinity,
+          onUploadProgress: (evt) => {
+            if (evt.total) {
+              targetJob.progress = Math.round((evt.loaded / evt.total) * 100);
+            }
+          },
+        }
+      );
+
+      // fileditch returns JSON: { files: [{ url, name, size, ... }] }
+      const ditchData = ditchRes.data;
+      if (!ditchData?.files?.length || !ditchData.files[0].url) {
+        throw new Error(`fileditch.com returned an unexpected response: ${JSON.stringify(ditchData)}`);
+      }
+      uploadUrl = ditchData.files[0].url.toString().trim();
+
+      if (!uploadUrl.startsWith('https://')) {
+        throw new Error(`fileditch.com returned an invalid URL: ${uploadUrl}`);
+      }
     }
-
-    const uploadUrl = pomfData.files[0].url;
 
     targetJob.status    = 'uploaded';
     targetJob.progress  = 100;
     targetJob.uploadUrl = uploadUrl;
 
-    console.log(`[upload] Done — ${uploadUrl}`);
-    return res.json({ success: true, url: uploadUrl });
+    console.log(`[upload] Done (${site}) — ${uploadUrl}`);
+    return res.json({ success: true, url: uploadUrl, site });
 
   } catch (err) {
     console.error('[upload] Error:', err.message);
@@ -444,7 +561,9 @@ const server = app.listen(PORT, () => {
   console.log(`Clipper server running on http://localhost:${PORT}`);
   console.log(`Max capture duration: ${MAX_CAPTURE_DURATION}s`);
   console.log(`Job TTL: ${JOB_TTL_MS / 1000}s`);
-  console.log(`pomf upload endpoint: ${POMF_UPLOAD_URL}`);
+  console.log(`catbox upload endpoint:      ${CATBOX_UPLOAD_URL}`);
+  console.log(`buzzheavier upload base:     ${BUZZHEAVIER_UPLOAD_BASE}`);
+  console.log(`fileditch upload endpoint:   ${FILEDITCH_UPLOAD_URL}`);
 });
 
 /* ==========================================================================
