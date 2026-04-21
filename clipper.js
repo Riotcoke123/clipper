@@ -1,8 +1,4 @@
 require('dotenv').config();
-
-/* ==========================================================================
-   IMPORTS
-   ========================================================================== */
 const express    = require('express');
 const bodyParser = require('body-parser');
 const cors       = require('cors');
@@ -14,66 +10,31 @@ const { v4: uuidv4 } = require('uuid');
 const axios      = require('axios');
 const FormData   = require('form-data');
 
-/* ==========================================================================
-   CONFIG
-   ========================================================================== */
 const app  = express();
 const PORT = process.env.PORT || 5000;
-
-// Max seconds a user can capture in one request
 const MAX_CAPTURE_DURATION = Number(process.env.MAX_CAPTURE_DURATION || 240);
-
-// How long (ms) to keep completed/errored jobs in memory before cleanup
 const JOB_TTL_MS = Number(process.env.JOB_TTL_SECONDS || 3600) * 1000;
-
-// catbox.moe upload endpoint (anonymous — no userhash required)
 const CATBOX_UPLOAD_URL = process.env.CATBOX_UPLOAD_URL || 'https://catbox.moe/user/api.php';
-
-// catbox.moe max file size: 200 MB
 const CATBOX_MAX_BYTES = 200 * 1024 * 1024;
-
-// buzzheavier.com upload base URL (anonymous PUT upload)
-// Usage: PUT https://w.buzzheavier.com/<filename>  with raw file body
 const BUZZHEAVIER_UPLOAD_BASE = process.env.BUZZHEAVIER_UPLOAD_BASE || 'https://w.buzzheavier.com';
-
-// fileditch.com upload endpoint (anonymous raw-body PUT, returns JSON { files: [{ url }] })
-// Usage: PUT https://new.fileditch.com/upload.php?filename=<filename>  with raw file body
 const FILEDITCH_UPLOAD_URL = process.env.FILEDITCH_UPLOAD_URL || 'https://new.fileditch.com/upload.php';
-
-/* ==========================================================================
-   DIRECTORIES
-   ========================================================================== */
 const tempDir  = path.join(__dirname, 'temp');
 const clipsDir = path.join(__dirname, 'public', 'clips');
-
 for (const dir of [tempDir, clipsDir]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-/* ==========================================================================
-   MIDDLEWARE
-   ========================================================================== */
 app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-/* ==========================================================================
-   JOB STORE
-   ========================================================================== */
-/**
- * In-memory job map.
- * Shape: { status, progress, outputFile, previewFile, error?, clipFile?, uploadUrl? }
- * Status flow: capturing → processing → ready → [clipping → clip_ready] → [uploading → uploaded]
- */
 const activeJobs = new Map();
 
-/** Schedules automatic removal of a finished/errored job after JOB_TTL_MS. */
 function scheduleJobCleanup(captureId) {
   setTimeout(() => {
     const job = activeJobs.get(captureId);
     if (!job) return;
 
-    // Delete files on disk then remove from map
     for (const key of ['outputFile', 'previewFile', 'clipFile']) {
       if (job[key] && fs.existsSync(job[key])) {
         fs.unlink(job[key], () => {});
@@ -84,13 +45,6 @@ function scheduleJobCleanup(captureId) {
   }, JOB_TTL_MS);
 }
 
-/* ==========================================================================
-   HELPERS
-   ========================================================================== */
-
-/**
- * Builds the yt-dlp format string from the quality setting.
- */
 function ytDlpFormat(quality) {
   switch (quality) {
     case 'low':    return 'worst[height>=480]/worst';
@@ -100,24 +54,14 @@ function ytDlpFormat(quality) {
   }
 }
 
-/**
- * Returns true when a job exists AND has reached one of the given statuses.
- */
+// *
+// * Returns true when a job exists AND has reached one of the given statuses.
+
 function jobIs(captureId, ...statuses) {
   const job = activeJobs.get(captureId);
   return job && statuses.includes(job.status);
 }
 
-/* ==========================================================================
-   ROUTES
-   ========================================================================== */
-
-/* ------------------------------------------------------------------
-   POST /api/capture-stream
-   Starts yt-dlp capture, streams to a temp file, then creates a
-   compressed preview clip. Returns captureId immediately; client
-   polls /api/capture-status/:captureId for progress.
-   ------------------------------------------------------------------ */
 app.post('/api/capture-stream', async (req, res) => {
   try {
     const { url, platform, quality, duration } = req.body;
@@ -232,10 +176,6 @@ app.post('/api/capture-stream', async (req, res) => {
   }
 });
 
-/* ------------------------------------------------------------------
-   GET /api/capture-status/:captureId
-   Returns current job progress and, when ready, the preview URL.
-   ------------------------------------------------------------------ */
 app.get('/api/capture-status/:captureId', (req, res) => {
   const { captureId } = req.params;
   const job = activeJobs.get(captureId);
@@ -270,11 +210,6 @@ app.get('/api/capture-status/:captureId', (req, res) => {
   return res.json(response);
 });
 
-/* ------------------------------------------------------------------
-   POST /api/create-clip
-   Cuts a segment out of the captured preview using ffmpeg.
-   Body: { captureId, startTime (seconds), duration (seconds) }
-   ------------------------------------------------------------------ */
 app.post('/api/create-clip', async (req, res) => {
   try {
     const { captureId, startTime, duration } = req.body;
@@ -341,26 +276,7 @@ app.post('/api/create-clip', async (req, res) => {
   }
 });
 
-/* ------------------------------------------------------------------
-   POST /api/upload-clip
-   Uploads a finished clip to catbox.moe, buzzheavier.com, or
-   fileditch.com and returns the public URL.
-   Body: { clipId, site? }
-         site = 'catbox' (default) | 'buzzheavier' | 'fileditch'
-
-   catbox.moe (max 200 MB):
-     POST https://catbox.moe/user/api.php
-     reqtype=fileupload  fileToUpload=<file data>
-     → responds with plain-text URL
-
-   buzzheavier.com (anonymous):
-     PUT https://w.buzzheavier.com/<filename>  (raw file body)
-     → responds with JSON { url } or plain-text URL
-
-   fileditch.com (anonymous):
-     PUT https://new.fileditch.com/upload.php?filename=<filename>  (raw file body)
-     → responds with JSON { files: [{ url }] }
-   ------------------------------------------------------------------ */
+// ------------------------------------------------------------------
 app.post('/api/upload-clip', async (req, res) => {
   try {
     const { clipId, site = 'catbox' } = req.body;
@@ -372,7 +288,6 @@ app.post('/api/upload-clip', async (req, res) => {
       return res.status(400).json({ error: 'site must be "catbox", "buzzheavier", or "fileditch".' });
     }
 
-    // Find the job that owns this clipId
     let targetJob = null;
     for (const [, job] of activeJobs) {
       if (job.clipId === clipId) { targetJob = job; break; }
@@ -393,7 +308,6 @@ app.post('/api/upload-clip', async (req, res) => {
     const { size: fileSize } = fs.statSync(targetJob.clipFile);
     const fileSizeMB = (fileSize / 1024 / 1024).toFixed(1);
 
-    // catbox.moe enforces a 200 MB hard limit
     if (site === 'catbox' && fileSize > CATBOX_MAX_BYTES) {
       return res.status(413).json({
         error: `Clip exceeds catbox.moe's 200 MB limit (file is ${fileSizeMB} MB). Try site=buzzheavier or site=fileditch instead.`,
@@ -407,7 +321,6 @@ app.post('/api/upload-clip', async (req, res) => {
 
     let uploadUrl;
 
-    /* ── catbox.moe ──────────────────────────────────────────────── */
     if (site === 'catbox') {
       // Anonymous upload: omit userhash
       // reqtype=fileupload  fileToUpload=<file data>
@@ -429,13 +342,11 @@ app.post('/api/upload-clip', async (req, res) => {
         },
       });
 
-      // catbox returns the plain-text URL, e.g. https://files.catbox.moe/xxxxxx.mp4
       uploadUrl = (catboxRes.data || '').toString().trim();
       if (!uploadUrl.startsWith('https://')) {
         throw new Error(`catbox.moe returned an unexpected response: ${uploadUrl}`);
       }
 
-    /* ── buzzheavier.com ─────────────────────────────────────────── */
     } else if (site === 'buzzheavier') {
       // Anonymous PUT upload — equivalent to:
       //   curl -#o - -T "clip.mp4" "https://w.buzzheavier.com/clip.mp4"
@@ -472,7 +383,6 @@ app.post('/api/upload-clip', async (req, res) => {
         throw new Error(`buzzheavier.com returned an unexpected response: ${uploadUrl}`);
       }
 
-    /* ── fileditch.com ───────────────────────────────────────────── */
     } else {
       // Anonymous raw-body PUT — equivalent to:
       //   curl -T clip.mp4 "https://new.fileditch.com/upload.php?filename=clip.mp4"
@@ -522,10 +432,6 @@ app.post('/api/upload-clip', async (req, res) => {
   }
 });
 
-/* ------------------------------------------------------------------
-   GET /api/download-clip/:clipId
-   Streams the clip file directly to the browser as a download.
-   ------------------------------------------------------------------ */
 app.get('/api/download-clip/:clipId', (req, res) => {
   const { clipId } = req.params;
 
@@ -543,9 +449,6 @@ app.get('/api/download-clip/:clipId', (req, res) => {
   fs.createReadStream(targetJob.clipFile).pipe(res);
 });
 
-/* ------------------------------------------------------------------
-   GET /healthz  — liveness probe
-   ------------------------------------------------------------------ */
 app.get('/healthz', (req, res) => {
   res.json({
     ok:         true,
@@ -554,9 +457,7 @@ app.get('/healthz', (req, res) => {
   });
 });
 
-/* ==========================================================================
-   SERVER START
-   ========================================================================== */
+
 const server = app.listen(PORT, () => {
   console.log(`Clipper server running on http://localhost:${PORT}`);
   console.log(`Max capture duration: ${MAX_CAPTURE_DURATION}s`);
@@ -566,9 +467,7 @@ const server = app.listen(PORT, () => {
   console.log(`fileditch upload endpoint:   ${FILEDITCH_UPLOAD_URL}`);
 });
 
-/* ==========================================================================
-   GRACEFUL SHUTDOWN  (mirrors server.js pattern)
-   ========================================================================== */
+
 async function gracefulShutdown(signal) {
   console.log(`\n${signal} received — shutting down gracefully...`);
   server.close(() => {
