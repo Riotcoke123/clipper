@@ -61,13 +61,10 @@
         <p>Ensure you have <b>FFmpeg</b> and <b>yt-dlp</b> installed on your host system before proceeding.</p>
         <pre><code># Clone the repo
 git clone https://github.com/Riotcoke123/clipper.git
-
 # Install dependencies
 npm install
-
 # Set up environment variables
 cp .env.example .env
-
 # Fire up the engine
 npm start</code></pre>
     </section>
@@ -83,7 +80,6 @@ npm start</code></pre>
         <h3>GET /api/capture-status/:captureId</h3>
         <p>Retrieves real-time progress and generated preview URLs.</p>
     </section>
-
 </div>
 
 </body>
