@@ -61,9 +61,11 @@ body::before {
 /* ── Header ── */
 header {
   display: flex;
-  align-items: flex-end;
-  gap: 16px;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 36px;
+  text-align: center;
 }
 
 .logo-mark {
@@ -112,6 +114,7 @@ header p {
   text-transform: uppercase;
   color: var(--text-muted);
   margin-bottom: 18px;
+  text-align: center;
 }
 
 /* ── Platform chips ── */
@@ -120,6 +123,7 @@ header p {
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 20px;
+  justify-content: center;
 }
 
 .platform-chip {
@@ -144,6 +148,42 @@ header p {
   background: var(--amber-glow);
   border-color: var(--amber);
   color: var(--amber);
+}
+
+/* ── Platform-specific outline colors ── */
+.platform-chip[data-platform="youtube"]:hover,
+.platform-chip[data-platform="youtube"].active {
+  border-color: #FF0000;
+  color: #FF0000;
+  background: rgba(255, 0, 0, 0.08);
+}
+
+.platform-chip[data-platform="twitch"]:hover,
+.platform-chip[data-platform="twitch"].active {
+  border-color: #9146FF;
+  color: #9146FF;
+  background: rgba(145, 70, 255, 0.08);
+}
+
+.platform-chip[data-platform="kick"]:hover,
+.platform-chip[data-platform="kick"].active {
+  border-color: #53FC18;
+  color: #53FC18;
+  background: rgba(83, 252, 24, 0.08);
+}
+
+.platform-chip[data-platform="odysee"]:hover,
+.platform-chip[data-platform="odysee"].active {
+  border-color: #E9130B;
+  color: #E9130B;
+  background: rgba(233, 19, 11, 0.08);
+}
+
+.platform-chip[data-platform="vaughn"]:hover,
+.platform-chip[data-platform="vaughn"].active {
+  border-color: #8A8F9E;
+  color: #8A8F9E;
+  background: rgba(138, 143, 158, 0.08);
 }
 
 .platform-chip .dot {
