@@ -18,10 +18,10 @@
 
 <h2>✨ Features</h2>
 <ul>
-  <li><strong>Multi-Platform Support</strong>: Seamlessly resolve and capture streams from YouTube, Twitch, Kick, Odysee, and Vaughn.live.[cite: 1]</li>
-  <li><strong>Dynamic Duration</strong>: Capture anywhere from 5 to 300 seconds of live footage.[cite: 1]</li>
-  <li><strong>Quality Selection</strong>: Choose between <strong>360p (Low)</strong>, <strong>720p (Medium)</strong>, or <strong>1080p (High)</strong>.[cite: 1]</li>
-  <li><strong>Real-Time Progress</strong>: Live job tracking via a custom polling API with status updates (Resolving, Capturing, Encoding).[cite: 1]</li>
+  <li><strong>Multi-Platform Support</strong>: Seamlessly resolve and capture streams from YouTube, Twitch, Kick, Odysee, and Vaughn.live.</li>
+  <li><strong>Dynamic Duration</strong>: Capture anywhere from 5 to 300 seconds of live footage.</li>
+  <li><strong>Quality Selection</strong>: Choose between <strong>360p (Low)</strong>, <strong>720p (Medium)</strong>, or <strong>1080p (High)</strong>.</li>
+  <li><strong>Real-Time Progress</strong>: Live job tracking via a custom polling API with status updates (Resolving, Capturing, Encoding).</li>
   <li><strong>Pro UI</strong>: Cyberpunk-inspired dashboard featuring scanline textures, JetBrains Mono typography, and amber-glow accents.</li>
 </ul>
 
@@ -30,9 +30,9 @@
 <h2>🛠️ Tech Stack</h2>
 <ul>
   <li><strong>Frontend</strong>: HTML5, CSS3 (Custom Variables), Vanilla JavaScript.</li>
-  <li><strong>Backend</strong>: Node.js, Express, and <code>better-sqlite3</code> for robust SQLite-backed job storage.[cite: 1]</li>
-  <li><strong>Processing</strong>: <code>fluent-ffmpeg</code> for encoding and <code>yt-dlp</code> for stream extraction.[cite: 1]</li>
-  <li><strong>Utilities</strong>: <code>dotenv</code> for configuration, <code>uuid</code> for job tracking, and <code>node-fetch</code> for API interactions.[cite: 1]</li>
+  <li><strong>Backend</strong>: Node.js, Express, and <code>better-sqlite3</code> for robust SQLite-backed job storage.</li>
+  <li><strong>Processing</strong>: <code>fluent-ffmpeg</code> for encoding and <code>yt-dlp</code> for stream extraction.</li>
+  <li><strong>Utilities</strong>: <code>dotenv</code> for configuration, <code>uuid</code> for job tracking, and <code>node-fetch</code> for API interactions.</li>
 </ul>
 
 <hr />
@@ -43,8 +43,8 @@
 <p>You <strong>must</strong> have the following installed on your system path:</p>
 <ol>
   <li><strong>Node.js</strong> (v18 or higher)</li>
-  <li><strong>FFmpeg</strong>: Required for video transcoding and clipping.[cite: 1]</li>
-  <li><strong>yt-dlp</strong>: Required for resolving live HLS/FLV manifests.[cite: 1]</li>
+  <li><strong>FFmpeg</strong>: Required for video transcoding and clipping.</li>
+  <li><strong>yt-dlp</strong>: Required for resolving live HLS/FLV manifests.</li>
 </ol>
 
 <h3>Installation</h3>
@@ -66,19 +66,19 @@ CLIP_OUTPUT_DIR=./public/clips
 CLIP_TEMP_DIR=./temp
 MAX_CLIP_SECONDS=300
 DEFAULT_CLIP_SECS=60
-DB_PATH=./clipper.db</code></pre>[cite: 1]
+DB_PATH=./clipper.db</code></pre>
   </li>
   <li>
     <strong>Start the server:</strong>
 <pre><code>npm start</code></pre>
-    <p>The application will be available at <code>http://localhost:4242</code>.[cite: 1]</p>
+    <p>The application will be available at <code>http://localhost:4242</code>.</p>
   </li>
 </ol>
 
 <hr />
 
 <h2>🛰️ API Documentation</h2>
-<p>Stream Clipper can be mounted as an Express router or used via its standalone REST API.[cite: 1]</p>
+<p>Stream Clipper can be mounted as an Express router or used via its standalone REST API.</p>
 
 <table>
   <thead>
@@ -92,32 +92,32 @@ DB_PATH=./clipper.db</code></pre>[cite: 1]
     <tr>
       <td><code>/api/clipper/clip</code></td>
       <td><code>POST</code></td>
-      <td>Starts a new clipping job (requires <code>platform</code> and <code>username</code>).[cite: 1]</td>
+      <td>Starts a new clipping job (requires <code>platform</code> and <code>username</code>).</td>
     </tr>
     <tr>
       <td><code>/api/clipper/clip/:jobId</code></td>
       <td><code>GET</code></td>
-      <td>Returns the current status and progress of a job.[cite: 1]</td>
+      <td>Returns the current status and progress of a job.</td>
     </tr>
     <tr>
       <td><code>/api/clipper/clip/:jobId/download</code></td>
       <td><code>GET</code></td>
-      <td>Downloads the finished <code>.mp4</code> file and subsequently deletes it to save disk space.[cite: 1]</td>
+      <td>Downloads the finished <code>.mp4</code> file and subsequently deletes it to save disk space.</td>
     </tr>
     <tr>
       <td><code>/api/clipper/clip/:jobId</code></td>
       <td><code>DELETE</code></td>
-      <td>Cancels or discards a job and deletes its output file.[cite: 1]</td>
+      <td>Cancels or discards a job and deletes its output file.</td>
     </tr>
     <tr>
       <td><code>/api/clipper/jobs</code></td>
       <td><code>GET</code></td>
-      <td>Lists all jobs (most recent first, maximum of 100).[cite: 1]</td>
+      <td>Lists all jobs (most recent first, maximum of 100).</td>
     </tr>
     <tr>
       <td><code>/api/clipper/platforms</code></td>
       <td><code>GET</code></td>
-      <td>Lists supported platforms and expected username input examples.[cite: 1]</td>
+      <td>Lists supported platforms and expected username input examples.</td>
     </tr>
   </tbody>
 </table>
@@ -136,28 +136,28 @@ DB_PATH=./clipper.db</code></pre>[cite: 1]
   <tbody>
     <tr>
       <td><strong>YouTube</strong></td>
-      <td><code>@handle</code> or Full URL[cite: 1]</td>
-      <td><code>yt-dlp</code> &rarr; HLS[cite: 1]</td>
+      <td><code>@handle</code> or Full URL</td>
+      <td><code>yt-dlp</code> &rarr; HLS</td>
     </tr>
     <tr>
       <td><strong>Twitch</strong></td>
-      <td><code>username</code>[cite: 1]</td>
-      <td><code>yt-dlp</code> &rarr; HLS[cite: 1]</td>
+      <td><code>username</code></td>
+      <td><code>yt-dlp</code> &rarr; HLS</td>
     </tr>
     <tr>
       <td><strong>Kick</strong></td>
-      <td><code>username</code>[cite: 1]</td>
-      <td>Kick API &rarr; HLS / yt-dlp fallback[cite: 1]</td>
+      <td><code>username</code></td>
+      <td>Kick API &rarr; HLS / yt-dlp fallback</td>
     </tr>
     <tr>
       <td><strong>Odysee</strong></td>
-      <td><code>@Channel</code> or Full URL[cite: 1]</td>
-      <td>Odysee Live API &rarr; HLS / yt-dlp fallback[cite: 1]</td>
+      <td><code>@Channel</code> or Full URL</td>
+      <td>Odysee Live API &rarr; HLS / yt-dlp fallback</td>
     </tr>
     <tr>
       <td><strong>Vaughn.live</strong></td>
-      <td><code>username</code>[cite: 1]</td>
-      <td>Direct FLV CDN &rarr; FFmpeg[cite: 1]</td>
+      <td><code>username</code></td>
+      <td>Direct FLV CDN &rarr; FFmpeg</td>
     </tr>
   </tbody>
 </table>
