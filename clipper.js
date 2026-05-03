@@ -21,6 +21,7 @@
  *   VAUGHN_CDN_BASE   — Vaughn FLV CDN root                      (default: https://stream-cdn-iad3.vaughnsoft.net/play)
  *   MAX_CLIP_SECONDS  — hard cap on requested duration           (default: 300)
  *   DEFAULT_CLIP_SECS — fallback duration when none provided     (default: 60)
+ *   DB_PATH           — path to the SQLite database file         (default: ./clipper.db)
  */
 
 'use strict';
@@ -34,6 +35,7 @@ const path     = require('path');
 const fs       = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const fetch    = (...a) => import('node-fetch').then(({ default: f }) => f(...a));
+const Database = require('better-sqlite3');
 
 /* ============================================================
    CONFIG
@@ -48,6 +50,7 @@ const VAUGHN_API_BASE  = process.env.VAUGHN_API_BASE  || 'https://api.vaughnsoft
 const VAUGHN_CDN_BASE  = process.env.VAUGHN_CDN_BASE  || 'https://stream-cdn-iad3.vaughnsoft.net/play';
 const MAX_CLIP_SECONDS  = Number(process.env.MAX_CLIP_SECONDS)  || 300;
 const DEFAULT_CLIP_SECS = Number(process.env.DEFAULT_CLIP_SECS) || 60;
+const DB_PATH           = process.env.DB_PATH || path.join(__dirname, 'clipper.db');
 
 /* Ensure directories exist */
 [CLIP_OUTPUT_DIR, CLIP_TEMP_DIR].forEach(d => {
@@ -55,10 +58,8 @@ const DEFAULT_CLIP_SECS = Number(process.env.DEFAULT_CLIP_SECS) || 60;
 });
 
 /* ============================================================
-   JOB STORE  (in-memory; replace with SQLite if needed)
+   JOB STORE  (SQLite-backed)
    ============================================================ */
-/** @type {Map<string, ClipJob>} */
-const jobs = new Map();
 
 /**
  * @typedef {Object} ClipJob
@@ -73,6 +74,66 @@ const jobs = new Map();
  * @property {string|null} error
  * @property {string}  createdAt      ISO timestamp
  */
+
+const db = new Database(DB_PATH);
+
+// WAL mode for better concurrent read/write performance
+db.pragma('journal_mode = WAL');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS jobs (
+    id          TEXT PRIMARY KEY,
+    platform    TEXT NOT NULL,
+    username    TEXT NOT NULL,
+    duration    INTEGER NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    progress    INTEGER NOT NULL DEFAULT 0,
+    outputFile  TEXT,
+    downloadUrl TEXT,
+    error       TEXT,
+    createdAt   TEXT NOT NULL
+  )
+`);
+
+// Prepared statements
+const stmtInsert = db.prepare(`
+  INSERT INTO jobs (id, platform, username, duration, status, progress, outputFile, downloadUrl, error, createdAt)
+  VALUES (@id, @platform, @username, @duration, @status, @progress, @outputFile, @downloadUrl, @error, @createdAt)
+`);
+
+const stmtSelectOne = db.prepare('SELECT * FROM jobs WHERE id = ?');
+
+const stmtUpdate = db.prepare(`
+  UPDATE jobs
+  SET status      = COALESCE(@status,      status),
+      progress    = COALESCE(@progress,    progress),
+      outputFile  = COALESCE(@outputFile,  outputFile),
+      downloadUrl = COALESCE(@downloadUrl, downloadUrl),
+      error       = COALESCE(@error,       error)
+  WHERE id = @id
+`);
+
+const stmtDelete  = db.prepare('DELETE FROM jobs WHERE id = ?');
+const stmtCount   = db.prepare('SELECT COUNT(*) AS n FROM jobs');
+const stmtRecent  = db.prepare('SELECT * FROM jobs ORDER BY createdAt DESC LIMIT 100');
+
+/** Parse a raw DB row back into a ClipJob (coerce integer progress). */
+function rowToJob(row) {
+  if (!row) return null;
+  return { ...row, progress: Number(row.progress), duration: Number(row.duration) };
+}
+
+/**
+ * Thin compatibility shim so the rest of the file can still call
+ * jobs.get / jobs.set / jobs.delete / jobs.values / jobs.size.
+ */
+const jobs = {
+  get:    (id)       => rowToJob(stmtSelectOne.get(id)),
+  set:    (_id, job) => stmtInsert.run(job),   // only used by createJob
+  delete: (id)       => { stmtDelete.run(id); },
+  values: ()         => stmtRecent.all().map(rowToJob),
+  get size()         { return stmtCount.get().n; },
+};
 
 function createJob(platform, username, duration) {
   const id = uuidv4();
@@ -89,13 +150,19 @@ function createJob(platform, username, duration) {
     error: null,
     createdAt: new Date().toISOString(),
   };
-  jobs.set(id, job);
+  stmtInsert.run(job);
   return job;
 }
 
 function updateJob(id, patch) {
-  const job = jobs.get(id);
-  if (job) jobs.set(id, { ...job, ...patch });
+  stmtUpdate.run({
+    id,
+    status:      patch.status      ?? null,
+    progress:    patch.progress    ?? null,
+    outputFile:  patch.outputFile  ?? null,
+    downloadUrl: patch.downloadUrl ?? null,
+    error:       patch.error       ?? null,
+  });
 }
 
 /* ============================================================
@@ -479,12 +546,7 @@ function startClip({ platform, username, duration, quality = 'medium' }) {
       const outFile = await captureClip(job.id, stream, secs, quality);
 
       const downloadUrl = `/clips/clip_${job.id}.mp4`;
-      updateJob(job.id, {
-        status: 'ready',
-        progress: 100,
-        outputFile: outFile,
-        downloadUrl,
-      });
+      updateJob(job.id, { status: 'ready', progress: 100, outputFile: outFile, downloadUrl });
       console.log(`[Clipper] Job ${job.id} ready → ${outFile}`);
     } catch (err) {
       console.error(`[Clipper] Job ${job.id} failed:`, err.message);
@@ -586,9 +648,7 @@ router.delete('/clip/:jobId', (req, res) => {
  * List all jobs (most recent first, max 100).
  */
 router.get('/jobs', (_req, res) => {
-  const list = [...jobs.values()]
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 100);
+  const list = jobs.values();
   res.json({ jobs: list, total: jobs.size });
 });
 
