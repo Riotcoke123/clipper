@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stream Clipper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="clipper.css">
+</head>
+<body>
+<div class="page-wrap">
+
+  <header>
+    <div class="logo-mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#0c0e14" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="5 3 19 12 5 21 5 3"/>
+      </svg>
+    </div>
+    <div>
+      <p>STREAM CLIPPER / v1.0</p>
+      <h1>Clip anything.</h1>
+    </div>
+  </header>
+
+  <!-- ── CAPTURE CARD ── -->
+  <div class="card" id="capture-card">
+    <div class="card-title">Platform</div>
+
+    <div class="platforms" id="platform-chips">
+      <div class="platform-chip active" data-platform="youtube">
+        <span class="dot"></span> YouTube
+      </div>
+      <div class="platform-chip" data-platform="twitch">
+        <span class="dot"></span> Twitch
+      </div>
+      <div class="platform-chip" data-platform="kick">
+        <span class="dot"></span> Kick
+      </div>
+      <div class="platform-chip" data-platform="odysee">
+        <span class="dot"></span> Odysee
+      </div>
+      <div class="platform-chip" data-platform="vaughn">
+        <span class="dot"></span> Vaughn.live
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="username-input">Channel / URL</label>
+      <input
+        type="text"
+        id="username-input"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="username or full stream URL"
+      />
+      <div class="platform-hint" id="platform-hint">e.g. mkbhd — or paste a full live URL</div>
+    </div>
+
+    <div class="controls-row">
+      <div class="control-block">
+        <label>Duration</label>
+        <div class="slider-wrap">
+          <input type="range" id="duration-slider" min="5" max="300" step="5" value="60">
+          <span class="slider-val" id="duration-val">60s</span>
+        </div>
+      </div>
+      <div class="control-block">
+        <label>Quality</label>
+        <select id="quality-select">
+          <option value="low">Low — 360p</option>
+          <option value="medium" selected>Medium — 720p</option>
+          <option value="high">High — 1080p</option>
+        </select>
+      </div>
+    </div>
+
+    <button class="btn-capture" id="capture-btn">Capture Clip</button>
+  </div>
+
+  <!-- ── PROGRESS CARD ── -->
+  <div class="card progress-card" id="progress-card">
+    <div class="card-title">Job progress</div>
+    <div class="job-id-line" id="job-id-line">job: —</div>
+
+    <div class="status-line">
+      <span class="status-badge" id="status-badge">pending</span>
+      <span class="status-msg" id="status-msg"><span class="spinner"></span> Starting…</span>
+    </div>
+
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="progress-fill"></div>
+    </div>
+    <div class="progress-pct" id="progress-pct">0%</div>
+
+    <div class="error-box" id="error-box"></div>
+
+    <div class="new-clip-row">
+      <button class="btn-secondary" id="cancel-btn">New clip</button>
+    </div>
+  </div>
+
+  <!-- ── RESULT CARD ── -->
+  <div class="card result-card" id="result-card">
+    <div class="card-title">Clip ready</div>
+
+    <div class="result-row">
+      <input class="clip-url-input" type="text" id="clip-url-field" readonly value="">
+      <button class="btn-copy" id="copy-btn">Copy</button>
+      <a class="btn-download" id="download-link" href="#">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download
+      </a>
+    </div>
+
+    <div class="new-clip-row" style="margin-top: 18px;">
+      <button class="btn-secondary" id="new-clip-btn">Clip another stream</button>
+    </div>
+  </div>
+
+  <footer>youtube · twitch · kick · odysee · vaughn.live</footer>
+</div>
+
+<script>
+(function () {
+  /* ── State ── */
+  let activePlatform = 'youtube';
+  let pollInterval = null;
+
+  const PLATFORM_HINTS = {
+    youtube: 'e.g. mkbhd — or paste a full YouTube live URL',
+    twitch:  'e.g. xqc',
+    kick:    'e.g. xqc',
+    odysee:  'e.g. @DistroWatch — or paste an Odysee channel URL',
+    vaughn:  'e.g. someuser (Vaughn.live channel name)',
+  };
+
+  /* ── Elements ── */
+  const captureCard   = document.getElementById('capture-card');
+  const progressCard  = document.getElementById('progress-card');
+  const resultCard    = document.getElementById('result-card');
+
+  const chips         = document.querySelectorAll('.platform-chip');
+  const usernameInput = document.getElementById('username-input');
+  const platformHint  = document.getElementById('platform-hint');
+  const durationSlider = document.getElementById('duration-slider');
+  const durationVal   = document.getElementById('duration-val');
+  const qualitySelect = document.getElementById('quality-select');
+  const captureBtn    = document.getElementById('capture-btn');
+
+  const jobIdLine     = document.getElementById('job-id-line');
+  const statusBadge   = document.getElementById('status-badge');
+  const statusMsg     = document.getElementById('status-msg');
+  const progressFill  = document.getElementById('progress-fill');
+  const progressPct   = document.getElementById('progress-pct');
+  const errorBox      = document.getElementById('error-box');
+  const cancelBtn     = document.getElementById('cancel-btn');
+
+  const clipUrlField  = document.getElementById('clip-url-field');
+  const copyBtn       = document.getElementById('copy-btn');
+  const downloadLink  = document.getElementById('download-link');
+  const newClipBtn    = document.getElementById('new-clip-btn');
+
+  /* ── Platform chips ── */
+  chips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      chips.forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      activePlatform = chip.dataset.platform;
+      platformHint.textContent = PLATFORM_HINTS[activePlatform] || '';
+    });
+  });
+
+  /* ── Auto-detect platform from pasted URL ── */
+  usernameInput.addEventListener('input', () => {
+    const v = usernameInput.value.trim();
+    const map = {
+      'youtube.com': 'youtube',
+      'youtu.be':    'youtube',
+      'twitch.tv':   'twitch',
+      'kick.com':    'kick',
+      'odysee.com':  'odysee',
+      'vaughn.live': 'vaughn',
+    };
+    for (const [host, platform] of Object.entries(map)) {
+      if (v.includes(host)) {
+        chips.forEach(c => c.classList.remove('active'));
+        const chip = document.querySelector(`[data-platform="${platform}"]`);
+        if (chip) chip.classList.add('active');
+        activePlatform = platform;
+        platformHint.textContent = PLATFORM_HINTS[platform];
+        break;
+      }
+    }
+  });
+
+  /* ── Duration slider ── */
+  durationSlider.addEventListener('input', () => {
+    durationVal.textContent = durationSlider.value + 's';
+  });
+
+  /* ── Capture button ── */
+  captureBtn.addEventListener('click', async () => {
+    const username = usernameInput.value.trim();
+    if (!username) {
+      usernameInput.focus();
+      usernameInput.style.borderColor = 'var(--red)';
+      setTimeout(() => { usernameInput.style.borderColor = ''; }, 1200);
+      return;
+    }
+
+    const payload = {
+      platform: activePlatform,
+      username,
+      duration: parseInt(durationSlider.value, 10),
+      quality:  qualitySelect.value,
+    };
+
+    showProgress();
+    setStatus('pending', '<span class="spinner"></span> Submitting job…');
+
+    try {
+      const res = await fetch('/api/clipper/clip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+
+      jobIdLine.textContent = 'job: ' + data.jobId;
+      startPolling(data.jobId);
+    } catch (err) {
+      setStatus('error', 'Submit failed');
+      showError(err.message);
+    }
+  });
+
+  /* ── Cancel / new clip ── */
+  cancelBtn.addEventListener('click', reset);
+  newClipBtn.addEventListener('click', reset);
+
+  /* ── Copy ── */
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(clipUrlField.value).catch(() => {});
+    copyBtn.textContent = 'Copied!';
+    copyBtn.classList.add('copied');
+    setTimeout(() => {
+      copyBtn.textContent = 'Copy';
+      copyBtn.classList.remove('copied');
+    }, 2000);
+  });
+
+  /* ── Polling ── */
+  function startPolling(jobId) {
+    clearInterval(pollInterval);
+    pollInterval = setInterval(() => pollJob(jobId), 1200);
+    pollJob(jobId);
+  }
+
+  async function pollJob(jobId) {
+    try {
+      const res = await fetch(`/api/clipper/clip/${jobId}`);
+      if (!res.ok) return;
+      const job = await res.json();
+      applyJobState(job);
+    } catch (_) {}
+  }
+
+  function applyJobState(job) {
+    const pct = Math.round(job.progress || 0);
+    progressFill.style.width = pct + '%';
+    progressPct.textContent = pct + '%';
+
+    const msgMap = {
+      pending:    '<span class="spinner"></span> Queued…',
+      resolving:  '<span class="spinner"></span> Resolving stream URL…',
+      capturing:  '<span class="spinner"></span> Capturing from ' + job.platform + '…',
+      encoding:   '<span class="spinner"></span> Encoding clip…',
+      ready:      '<span class="spinner green"></span> Done!',
+      error:      'Failed.',
+    };
+    setStatus(job.status, msgMap[job.status] || job.status);
+
+    if (job.status === 'ready') {
+      clearInterval(pollInterval);
+      progressFill.classList.add('done');
+      setTimeout(() => showResult(job), 600);
+    }
+
+    if (job.status === 'error') {
+      clearInterval(pollInterval);
+      progressFill.classList.add('err');
+      showError(job.error || 'Unknown error');
+    }
+  }
+
+  /* ── UI helpers ── */
+  function showProgress() {
+    captureCard.style.display = 'none';
+    progressCard.classList.add('visible');
+    resultCard.classList.remove('visible');
+    errorBox.classList.remove('visible');
+    progressFill.style.width = '0%';
+    progressFill.classList.remove('done', 'err');
+    progressPct.textContent = '0%';
+    jobIdLine.textContent = 'job: —';
+  }
+
+  function showResult(job) {
+    progressCard.classList.remove('visible');
+    resultCard.classList.add('visible');
+    const downloadUrl = `/api/clipper/clip/${job.id}/download`;
+    clipUrlField.value = window.location.origin + downloadUrl;
+    downloadLink.href = downloadUrl;
+  }
+
+  function reset() {
+    clearInterval(pollInterval);
+    captureCard.style.display = '';
+    progressCard.classList.remove('visible');
+    resultCard.classList.remove('visible');
+    errorBox.classList.remove('visible');
+    progressFill.style.width = '0%';
+    progressFill.classList.remove('done', 'err');
+  }
+
+  function setStatus(state, msgHtml) {
+    statusBadge.className = 'status-badge ' + state;
+    statusBadge.textContent = state;
+    statusMsg.innerHTML = msgHtml;
+  }
+
+  function showError(msg) {
+    errorBox.textContent = '! ' + msg;
+    errorBox.classList.add('visible');
+  }
+})();
+</script>
+</body>
+</html>
