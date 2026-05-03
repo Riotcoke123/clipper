@@ -179,13 +179,6 @@ header p {
   background: rgba(233, 19, 11, 0.08);
 }
 
-.platform-chip[data-platform="vaughn"]:hover,
-.platform-chip[data-platform="vaughn"].active {
-  border-color: #8A8F9E;
-  color: #8A8F9E;
-  background: rgba(138, 143, 158, 0.08);
-}
-
 .platform-chip .dot {
   width: 7px;
   height: 7px;

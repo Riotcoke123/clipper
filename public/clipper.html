@@ -40,9 +40,6 @@
       <div class="platform-chip" data-platform="odysee">
         <span class="dot"></span> Odysee
       </div>
-      <div class="platform-chip" data-platform="vaughn">
-        <span class="dot"></span> Vaughn.live
-      </div>
     </div>
 
     <div class="field">
@@ -146,7 +143,7 @@
     </div>
   </div>
 
-  <footer>youtube · twitch · kick · odysee · vaughn.live</footer>
+  <footer>youtube · twitch · kick · odysee</footer>
 </div>
 
 <script>
@@ -160,7 +157,6 @@
     twitch:  'e.g. xqc',
     kick:    'e.g. xqc',
     odysee:  'e.g. @DistroWatch — or paste an Odysee channel URL',
-    vaughn:  'e.g. someuser (Vaughn.live channel name)',
   };
 
   /* ── Elements ── */
@@ -239,7 +235,7 @@
         return null; // username-only — Odysee needs a full URL with claim ID
       }
       default:
-        return null; // vaughn — no public embed
+        return null;
     }
   }
 
@@ -271,7 +267,6 @@
       const msgs = {
         odysee: 'Paste a full Odysee URL (with claim ID) to preview — e.g. odysee.com/@Channel:id',
         youtube: 'Paste a full YouTube live URL to preview — e.g. youtube.com/watch?v=...',
-        vaughn:  'Vaughn.live has no public embed — clip will still work.',
       };
       streamPreviewUnavail.textContent = msgs[activePlatform] || 'No embed available — clip will still work.';
       streamPreviewUnavail.classList.add('visible');
@@ -296,7 +291,6 @@
       'twitch.tv':   'twitch',
       'kick.com':    'kick',
       'odysee.com':  'odysee',
-      'vaughn.live': 'vaughn',
     };
     for (const [host, platform] of Object.entries(map)) {
       if (v.includes(host)) {
