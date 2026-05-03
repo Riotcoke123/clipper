@@ -1,6 +1,5 @@
 <div align="center">
-
-<img width="785" height="888" alt="Untitled" src="https://github.com/user-attachments/assets/90d5f035-1bf7-479c-8a4d-8b9227f9f8a2" />
+<img width="780" height="829" alt="Untitled" src="https://github.com/user-attachments/assets/e1ad1e5e-a6c9-479c-b5d7-3b85f80a1a28" />
 
 
 <h1>🎬 Stream Clipper</h1>
