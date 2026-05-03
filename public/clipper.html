@@ -219,8 +219,27 @@
         if (m) return `https://www.youtube.com/embed/${m[1]}?autoplay=1&mute=1`;
         return null; // handle-only — can't embed without video ID
       }
+      case 'odysee': {
+        // Odysee embed uses /$/embed/<name>/<claimId>
+        // Full URL formats:
+        //   odysee.com/@Channel:id/video-name:claimId  → embed video claim
+        //   odysee.com/@Channel:id                     → embed channel (shows live/latest)
+        const clean = v.replace(/^https?:\/\/(www\.)?odysee\.com\//i, '');
+        if (!clean) return null;
+        // Video claim inside a channel: @Channel:abc/my-video:def
+        const videoMatch = clean.match(/^@[^/]+\/([^/:]+):([a-f0-9]+)/i);
+        if (videoMatch) {
+          return `https://odysee.com/$/embed/${videoMatch[1]}/${videoMatch[2]}?autoplay=1&muted=1`;
+        }
+        // Channel-only: @Channel:claimId
+        const channelMatch = clean.match(/^(@[^/:]+):([a-f0-9]+)/i);
+        if (channelMatch) {
+          return `https://odysee.com/$/embed/${channelMatch[1]}/${channelMatch[2]}?autoplay=1&muted=1`;
+        }
+        return null; // username-only — Odysee needs a full URL with claim ID
+      }
       default:
-        return null; // odysee, vaughn — no public embed
+        return null; // vaughn — no public embed
     }
   }
 
@@ -249,6 +268,12 @@
     } else {
       streamPreviewIframe.src = 'about:blank';
       streamPreviewIframe.style.display = 'none';
+      const msgs = {
+        odysee: 'Paste a full Odysee URL (with claim ID) to preview — e.g. odysee.com/@Channel:id',
+        youtube: 'Paste a full YouTube live URL to preview — e.g. youtube.com/watch?v=...',
+        vaughn:  'Vaughn.live has no public embed — clip will still work.',
+      };
+      streamPreviewUnavail.textContent = msgs[activePlatform] || 'No embed available — clip will still work.';
       streamPreviewUnavail.classList.add('visible');
     }
   }
