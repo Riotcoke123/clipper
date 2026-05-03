@@ -108,21 +108,19 @@ function updateJob(id, patch) {
  */
 async function resolveYouTube(username) {
   // Normalise: bare handle → full URL
+  // Return the page URL directly — yt-dlp resolves format + auth in one shot
+  // during captureClip, avoiding signed-URL expiry from a two-step --get-url call.
   const url = username.startsWith('http')
     ? username
     : `https://www.youtube.com/@${username}/live`;
-
-  const m3u8 = await ytDlpGetUrl(url, ['--format', 'best[protocol=m3u8_native]/best']);
-  return { type: 'hls', url: m3u8 };
+  return { type: 'ytdlp', url };
 }
 
 /**
  * Twitch — yt-dlp handles OAuth-less public stream extraction perfectly.
  */
 async function resolveTwitch(username) {
-  const url = `https://www.twitch.tv/${username}`;
-  const m3u8 = await ytDlpGetUrl(url, ['--format', 'best']);
-  return { type: 'hls', url: m3u8 };
+  return { type: 'ytdlp', url: `https://www.twitch.tv/${username}` };
 }
 
 /**
@@ -163,9 +161,8 @@ async function resolveKick(username) {
     console.warn(`[Kick] API failed (${err.message}), falling back to yt-dlp`);
   }
 
-  // Last resort: yt-dlp
-  const m3u8 = await ytDlpGetUrl(`https://kick.com/${username}`, ['--format', 'best']);
-  return { type: 'hls', url: m3u8 };
+  // Last resort: let yt-dlp resolve format + auth in one shot during captureClip
+  return { type: 'ytdlp', url: `https://kick.com/${username}` };
 }
 
 /**
@@ -226,12 +223,11 @@ async function resolveOdysee(username) {
     }
   } catch (_) {}
 
-  // 3. Fallback to yt-dlp
+  // 3. Fallback: let yt-dlp resolve format + auth in one shot during captureClip
   const pageUrl = username.startsWith('http')
     ? username
     : `https://odysee.com/@${username.replace(/^@/, '')}`;
-  const m3u8 = await ytDlpGetUrl(pageUrl, ['--format', 'best']);
-  return { type: 'hls', url: m3u8 };
+  return { type: 'ytdlp', url: pageUrl };
 }
 
 /**
@@ -365,10 +361,15 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
     });
   }
 
-  // --- HLS path: yt-dlp download → ffmpeg re-encode ---
-  const formatArg = quality === 'low'  ? 'worst[height>=360]/worst'
-                  : quality === 'high' ? 'best[height<=1080]/best'
-                  : 'best[height<=720]/best';
+  // --- HLS / yt-dlp path: yt-dlp download → ffmpeg re-encode ---
+  // 'ytdlp' type passes the original page URL so yt-dlp handles auth + format
+  // resolution in a single invocation (avoids signed-URL expiry from --get-url).
+  // 'hls' type passes a direct manifest URL obtained from a platform API.
+  const formatArg = quality === 'low'
+    ? 'worst[protocol^=m3u8][height>=360]/worst[protocol^=m3u8]/worst[height>=360]/worst'
+    : quality === 'high'
+    ? 'best[protocol^=m3u8][height<=1080]/best[protocol^=m3u8]/best[height<=1080]/best'
+    : 'best[protocol^=m3u8][height<=720]/best[protocol^=m3u8]/best[height<=720]/best';
 
   const tempFile = `${tempRaw}.mp4`;
 
