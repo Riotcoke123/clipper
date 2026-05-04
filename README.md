@@ -89,9 +89,7 @@ app.use('/api/clipper', clipper.router);[cite: 1]</code></pre>
         <h3><code>GET /api/clipper/clip/:jobId/download</code></h3>
         <p>Streams the MP4 to the client and triggers <strong>auto-deletion</strong> from the server storage post-transfer to maintain disk health</p>
     </section>
-    <footer>
-        <p>CLIPPER.JS — Automated Media Pipeline — 2026</p>
-    </footer>
+
 </main>
 
 </body>
