@@ -3,7 +3,7 @@
     <header>
         <img src="https://github.com/user-attachments/assets/77f2d8f4-c842-4101-b285-d001d878ba23" alt="Clipper Hero" class="hero-img">
         <p style="font-size: 1.2rem; color: var(--text-secondary);">
-            A high-performance, multi-platform live stream clipping engine powered by Node.js, FFmpeg, and SQLite[cite: 1].
+            A high-performance, multi-platform live stream clipping engine powered by Node.js, FFmpeg, and SQLite
         </p>
     </header>
     <section id="features">
@@ -12,22 +12,22 @@
             <div class="card">
                 <i class="fa-solid fa-layer-group"></i>
                 <h3>Multi-Platform</h3>
-                <p>Native integration for YouTube, Twitch, Kick, and Odysee[cite: 1].</p>
+                <p>Native integration for YouTube, Twitch, Kick, and Odysee</p>
             </div>
             <div class="card">
                 <i class="fa-solid fa-wand-magic-sparkles"></i>
                 <h3>Smart Resolution</h3>
-                <p>Identifies HLS manifests via platform APIs or <code>yt-dlp</code> fallbacks[cite: 1].</p>
+                <p>Identifies HLS manifests via platform APIs or <code>yt-dlp</code> fallbacks.</p>
             </div>
             <div class="card">
                 <i class="fa-solid fa-database"></i>
                 <h3>Job Persistence</h3>
-                <p>Uses a SQLite-backed job store with WAL mode for reliable tracking[cite: 1].</p>
+                <p>Uses a SQLite-backed job store with WAL mode for reliable tracking</p>
             </div>
             <div class="card">
                 <i class="fa-solid fa-server"></i>
                 <h3>Flexible Mode</h3>
-                <p>Mount as an Express router or run as a standalone server[cite: 1].</p>
+                <p>Mount as an Express router or run as a standalone server.</p>
             </div>
         </div>
     </section>
@@ -77,7 +77,7 @@ app.use('/api/clipper', clipper.router);[cite: 1]</code></pre>
     <section id="api">
         <h2>📡 API Reference</h2>
         <h3><code>POST /api/clipper/clip</code></h3>
-        <p>Initiates a background capture job[cite: 1].</p>
+        <p>Initiates a background capture job.</p>
         <pre><code>{
   "platform": "twitch",
   "username": "xqc",
@@ -85,12 +85,12 @@ app.use('/api/clipper', clipper.router);[cite: 1]</code></pre>
   "quality": "high"
 }</code></pre>
         <h3><code>GET /api/clipper/clip/:jobId</code></h3>
-        <p>Polling endpoint for status. Stages include <code>pending</code>, <code>resolving</code>, <code>capturing</code>, <code>encoding</code>, <code>ready</code>, or <code>error</code>[cite: 1].</p>
+        <p>Polling endpoint for status. Stages include <code>pending</code>, <code>resolving</code>, <code>capturing</code>, <code>encoding</code>, <code>ready</code>, or <code>error</code></p>
         <h3><code>GET /api/clipper/clip/:jobId/download</code></h3>
-        <p>Streams the MP4 to the client and triggers <strong>auto-deletion</strong> from the server storage post-transfer to maintain disk health[cite: 1].</p>
+        <p>Streams the MP4 to the client and triggers <strong>auto-deletion</strong> from the server storage post-transfer to maintain disk health</p>
     </section>
     <footer>
-        <p>CLIPPER.JS — Automated Media Pipeline — 2026[cite: 1]</p>
+        <p>CLIPPER.JS — Automated Media Pipeline — 2026</p>
     </footer>
 </main>
 
