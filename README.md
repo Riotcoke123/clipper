@@ -1,2 +1,2 @@
 <div align="center">
-<img width="1920" height="1200" alt="e" src="https://github.com/user-attachments/assets/fe0af77f-e481-4864-b0a5-b8f3509dac2f" />
+<img width="1011" height="1200" alt="Untitled(1)" src="https://github.com/user-attachments/assets/77f2d8f4-c842-4101-b285-d001d878ba23" />
