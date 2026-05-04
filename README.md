@@ -1,12 +1,4 @@
 
-<nav>
-    <h1>CLIPPER</h1>
-    <a href="#features">Features</a>
-    <a href="#config">Configuration</a>
-    <a href="#integration">Integration</a>
-    <a href="#api">API Reference</a>
-</nav>
-
 <main>
     <header>
         <img src="https://github.com/user-attachments/assets/77f2d8f4-c842-4101-b285-d001d878ba23" alt="Clipper Hero" class="hero-img">
