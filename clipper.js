@@ -1,7 +1,7 @@
 /**
  * clipper.js — Multi-platform live stream clipper
  *
- * Supported platforms: YouTube · Twitch · Kick · Odysee · Vaughn
+ * Supported platforms: YouTube · Twitch · Kick · Odysee
  *
  * Mount as an Express router:
  *   const clipper = require('./clipper');
@@ -17,8 +17,6 @@
  *   ODYSEE_LIVE_API   — Odysee live API root                     (default: https://api.odysee.live)
  *   ODYSEE_SDK_PROXY  — Odysee SDK proxy root                    (default: https://api.na-backend.odysee.com)
  *   ODYSEE_COOKIE     — auth cookie for Odysee (optional)
- *   VAUGHN_API_BASE   — Vaughn stream-status API                 (default: https://api.vaughnsoft.net/v1/stream/vl)
- *   VAUGHN_CDN_BASE   — Vaughn FLV CDN root                      (default: https://stream-cdn-iad3.vaughnsoft.net/play)
  *   MAX_CLIP_SECONDS  — hard cap on requested duration           (default: 300)
  *   DEFAULT_CLIP_SECS — fallback duration when none provided     (default: 60)
  *   DB_PATH           — path to the SQLite database file         (default: ./clipper.db)
@@ -46,8 +44,6 @@ const KICK_API_BASE    = process.env.KICK_API_BASE    || 'https://api.kick.com';
 const ODYSEE_LIVE_API  = process.env.ODYSEE_LIVE_API  || 'https://api.odysee.live';
 const ODYSEE_SDK_PROXY = process.env.ODYSEE_SDK_PROXY || 'https://api.na-backend.odysee.com';
 const ODYSEE_COOKIE    = process.env.ODYSEE_COOKIE    || '';
-const VAUGHN_API_BASE  = process.env.VAUGHN_API_BASE  || 'https://api.vaughnsoft.net/v1/stream/vl';
-const VAUGHN_CDN_BASE  = process.env.VAUGHN_CDN_BASE  || 'https://stream-cdn-iad3.vaughnsoft.net/play';
 const MAX_CLIP_SECONDS  = Number(process.env.MAX_CLIP_SECONDS)  || 300;
 const DEFAULT_CLIP_SECS = Number(process.env.DEFAULT_CLIP_SECS) || 60;
 const DB_PATH           = process.env.DB_PATH || path.join(__dirname, 'clipper.db');
@@ -297,30 +293,6 @@ async function resolveOdysee(username) {
   return { type: 'ytdlp', url: pageUrl };
 }
 
-/**
- * Vaughn.live — direct FLV CDN URL.
- * Checks the Vaughn API first to confirm the channel is live.
- */
-async function resolveVaughn(username) {
-  // Optional live-check via Vaughn API
-  try {
-    const res = await fetch(`${VAUGHN_API_BASE}/${encodeURIComponent(username.toLowerCase())}`, {
-      headers: { 'Accept': 'application/json' },
-    });
-    if (res.ok) {
-      const json = await res.json();
-      const isLive = json?.state === 'live' || json?.isLive === true || !!json?.title;
-      if (!isLive) throw new Error(`${username} is not live on Vaughn`);
-    }
-  } catch (err) {
-    // If the API is unreachable, attempt the CDN anyway — it will fail fast if offline
-    console.warn(`[Vaughn] Live-check warning: ${err.message}`);
-  }
-
-  const flvUrl = `${VAUGHN_CDN_BASE}/live_${username.toLowerCase()}.flv`;
-  return { type: 'flv', url: flvUrl };
-}
-
 /* ============================================================
    yt-dlp HELPER  — get a direct stream URL without downloading
    ============================================================ */
@@ -370,7 +342,6 @@ async function resolveStreamUrl(platform, username) {
     case 'twitch':  return resolveTwitch(username);
     case 'kick':    return resolveKick(username);
     case 'odysee':  return resolveOdysee(username);
-    case 'vaughn':  return resolveVaughn(username);
     default:        throw new Error(`Unsupported platform: "${platform}"`);
   }
 }
@@ -520,7 +491,7 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
  * Start a clip job asynchronously. Returns the job object immediately.
  *
  * @param {Object} opts
- * @param {string} opts.platform   'youtube'|'twitch'|'kick'|'odysee'|'vaughn'
+ * @param {string} opts.platform   'youtube'|'twitch'|'kick'|'odysee'
  * @param {string} opts.username   channel handle / URL
  * @param {number} [opts.duration] seconds to capture (capped at MAX_CLIP_SECONDS)
  * @param {'low'|'medium'|'high'} [opts.quality]
@@ -575,7 +546,7 @@ router.post('/clip', (req, res) => {
       return res.status(400).json({ error: 'platform and username are required' });
     }
 
-    const VALID_PLATFORMS = ['youtube', 'twitch', 'kick', 'odysee', 'vaughn'];
+    const VALID_PLATFORMS = ['youtube', 'twitch', 'kick', 'odysee'];
     if (!VALID_PLATFORMS.includes(platform.toLowerCase())) {
       return res.status(400).json({
         error: `Unsupported platform. Valid: ${VALID_PLATFORMS.join(', ')}`,
@@ -663,7 +634,6 @@ router.get('/platforms', (_req, res) => {
       { id: 'twitch',  label: 'Twitch',     usernameExample: 'xqc',                                          method: 'yt-dlp → HLS' },
       { id: 'kick',    label: 'Kick',        usernameExample: 'xqc',                                          method: 'Kick API → HLS / yt-dlp fallback' },
       { id: 'odysee',  label: 'Odysee',     usernameExample: '@DistroWatch  OR  https://odysee.com/@Channel', method: 'Odysee live API → HLS / yt-dlp fallback' },
-      { id: 'vaughn',  label: 'Vaughn.live', usernameExample: 'someuser',                                     method: 'Direct FLV CDN → ffmpeg' },
     ],
   });
 });
