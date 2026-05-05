@@ -44,6 +44,9 @@ const KICK_API_BASE    = process.env.KICK_API_BASE    || 'https://api.kick.com';
 const ODYSEE_LIVE_API  = process.env.ODYSEE_LIVE_API  || 'https://api.odysee.live';
 const ODYSEE_SDK_PROXY = process.env.ODYSEE_SDK_PROXY || 'https://api.na-backend.odysee.com';
 const ODYSEE_COOKIE    = process.env.ODYSEE_COOKIE    || '';
+const CATBOX_USERHASH        = process.env.CATBOX_USERHASH        || '';
+const BUZZHEAVIER_ACCOUNT_ID = process.env.BUZZHEAVIER_ACCOUNT_ID || '';
+const BUZZHEAVIER_PARENT_ID  = process.env.BUZZHEAVIER_PARENT_ID  || BUZZHEAVIER_ACCOUNT_ID;
 const MAX_CLIP_SECONDS  = Number(process.env.MAX_CLIP_SECONDS)  || 300;
 const DEFAULT_CLIP_SECS = Number(process.env.DEFAULT_CLIP_SECS) || 60;
 const DB_PATH           = process.env.DB_PATH || path.join(__dirname, 'clipper.db');
@@ -414,12 +417,17 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
   await new Promise((resolve, reject) => {
     updateJob(jobId, { status: 'capturing', progress: 2 });
 
+    // Kick's extractor requires browser impersonation to bypass bot detection.
+    // Needs curl_cffi: pip install curl_cffi  (or: pip install yt-dlp[default])
+    const needsImpersonation = /kick\.com/i.test(stream.url);
+
     const args = [
       '--no-playlist',
       '--no-check-certificate',
       '--format', formatArg,
       '--downloader', 'ffmpeg',
       '--downloader-args', `ffmpeg:-t ${duration}`,
+      ...(needsImpersonation ? ['--impersonate', 'chrome'] : []),
       '-o', tempFile,
       stream.url,
     ];
@@ -438,7 +446,7 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
     });
     proc.stderr.on('data', d => { stderr += d.toString(); });
     proc.on('close', code => {
-      if (code !== 0) reject(new Error(`yt-dlp exited ${code}: ${stderr.slice(0, 300)}`));
+      if (code !== 0) reject(new Error(`yt-dlp exited ${code}: ${stderr.slice(0, 2000)}`));
       else resolve();
     });
     proc.on('error', err => reject(new Error(`yt-dlp spawn: ${err.message}`)));
@@ -510,14 +518,19 @@ function startClip({ platform, username, duration, quality = 'medium' }) {
   // Fire-and-forget — caller polls /clip/:id for status
   (async () => {
     try {
-      updateJob(job.id, { status: 'resolving', progress: 1 });
+      // Pre-write the downloadUrl so it's always present when status flips to 'ready'.
+      // Without this, the 1.2 s poller can see status=ready with downloadUrl=null,
+      // fall back to the /download endpoint, and have the clip deleted before the
+      // user can watch the preview.
+      const downloadUrl = `/clips/clip_${job.id}.mp4`;
+      updateJob(job.id, { status: 'resolving', progress: 1, downloadUrl });
+
       const stream = await resolveStreamUrl(platform, username);
 
       updateJob(job.id, { status: 'capturing', progress: 2 });
       const outFile = await captureClip(job.id, stream, secs, quality);
 
-      const downloadUrl = `/clips/clip_${job.id}.mp4`;
-      updateJob(job.id, { status: 'ready', progress: 100, outputFile: outFile, downloadUrl });
+      updateJob(job.id, { status: 'ready', progress: 100, outputFile: outFile });
       console.log(`[Clipper] Job ${job.id} ready → ${outFile}`);
     } catch (err) {
       console.error(`[Clipper] Job ${job.id} failed:`, err.message);
@@ -598,6 +611,231 @@ router.get('/clip/:jobId/download', (req, res) => {
     fs.unlink(job.outputFile, () => {});
     updateJob(job.id, { outputFile: null, downloadUrl: null, status: 'downloaded' });
   });
+});
+
+/**
+ * POST /api/clipper/clip/:jobId/catbox
+ * Server-side proxy: reads the finished mp4 and uploads it to Catbox anonymously.
+ * Returns: { url } on success.
+ *
+ * We do this server-side because Catbox does not send CORS headers, so a
+ * direct browser fetch to catbox.moe/user/api.php is blocked.
+ */
+router.post('/clip/:jobId/catbox', async (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  const filePath = job.outputFile;
+  if (!filePath || !fs.existsSync(filePath)) {
+    return res.status(410).json({ error: 'Clip file not found on disk' });
+  }
+
+  try {
+    const fileBuffer = fs.readFileSync(filePath);
+    const filename   = `clip_${job.platform}_${job.username}_${job.duration}s.mp4`;
+    const boundary   = 'ClipperBoundary' + Date.now().toString(16);
+    const CRLF       = '\r\n';
+
+    // Manually build a valid multipart/form-data body as a single Buffer.
+    // node-fetch receives a Buffer and sets the body correctly without
+    // needing FormData or Blob — works on Node 16, 18, 20+.
+    const body = Buffer.concat([
+      // ── field: reqtype ──
+      Buffer.from(`--${boundary}${CRLF}`),
+      Buffer.from(`Content-Disposition: form-data; name="reqtype"${CRLF}`),
+      Buffer.from(CRLF),
+      Buffer.from(`fileupload${CRLF}`),
+      // ── field: userhash (empty = anonymous upload) ──
+      // Catbox requires this field to be present even for anonymous uploads;
+      // omitting it entirely returns 412 "Invalid uploader".
+      Buffer.from(`--${boundary}${CRLF}`),
+      Buffer.from(`Content-Disposition: form-data; name="userhash"${CRLF}`),
+      Buffer.from(CRLF),
+      Buffer.from(`${CATBOX_USERHASH}${CRLF}`),
+      // ── field: fileToUpload ──
+      Buffer.from(`--${boundary}${CRLF}`),
+      Buffer.from(`Content-Disposition: form-data; name="fileToUpload"; filename="${filename}"${CRLF}`),
+      Buffer.from(`Content-Type: video/mp4${CRLF}`),
+      Buffer.from(CRLF),          // blank line separates headers from body
+      fileBuffer,
+      Buffer.from(CRLF),
+      // ── closing boundary ──
+      Buffer.from(`--${boundary}--${CRLF}`),
+    ]);
+
+    console.log(`[Catbox] Uploading ${filename} — ${(body.length / 1048576).toFixed(1)} MB`);
+
+    const catboxRes = await fetch('https://catbox.moe/user/api.php', {
+      method: 'POST',
+      headers: {
+        'Content-Type':   `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': String(body.length),
+        'User-Agent':     process.env.USER_AGENT || 'Mozilla/5.0',
+      },
+      body,
+    });
+
+    const text = (await catboxRes.text()).trim();
+    console.log(`[Catbox] Response ${catboxRes.status}: ${text}`);
+
+    if (!catboxRes.ok) {
+      return res.status(502).json({ error: `Catbox HTTP ${catboxRes.status}: ${text}` });
+    }
+    if (!text.startsWith('https://')) {
+      return res.status(502).json({ error: `Unexpected Catbox response: ${text}` });
+    }
+
+    res.json({ url: text });
+  } catch (err) {
+    console.error('[Catbox] Upload error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/clipper/clip/:jobId/quax
+ * Server-side proxy: uploads the finished mp4 to qu.ax (no auth required).
+ * qu.ax accepts multipart/form-data with a "files[]" field.
+ * Returns: { url } on success.
+ *
+ * Done server-side because qu.ax does not send CORS headers, so a direct
+ * browser fetch is blocked.
+ */
+router.post('/clip/:jobId/quax', async (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  const filePath = job.outputFile;
+  if (!filePath || !fs.existsSync(filePath)) {
+    return res.status(410).json({ error: 'Clip file not found on disk' });
+  }
+
+  try {
+    const fileBuffer = fs.readFileSync(filePath);
+    const filename   = `clip_${job.platform}_${job.username}_${job.duration}s.mp4`;
+    const boundary   = 'QuaxBoundary' + Date.now().toString(16);
+    const CRLF       = '\r\n';
+
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}${CRLF}`),
+      Buffer.from(`Content-Disposition: form-data; name="files[]"; filename="${filename}"${CRLF}`),
+      Buffer.from(`Content-Type: video/mp4${CRLF}`),
+      Buffer.from(CRLF),
+      fileBuffer,
+      Buffer.from(CRLF),
+      Buffer.from(`--${boundary}--${CRLF}`),
+    ]);
+
+    console.log(`[qu.ax] Uploading ${filename} — ${(body.length / 1048576).toFixed(1)} MB`);
+
+    const quaxRes = await fetch('https://qu.ax/upload.php', {
+      method: 'POST',
+      headers: {
+        'Content-Type':   `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': String(body.length),
+        'User-Agent':     process.env.USER_AGENT || 'Mozilla/5.0',
+      },
+      body,
+    });
+
+    const text = (await quaxRes.text()).trim();
+    console.log(`[qu.ax] Response ${quaxRes.status}: ${text.slice(0, 200)}`);
+
+    if (!quaxRes.ok) {
+      return res.status(502).json({ error: `qu.ax HTTP ${quaxRes.status}: ${text}` });
+    }
+
+    // qu.ax returns JSON: { files: [{ url, name, size }] }
+    let url;
+    try {
+      const json = JSON.parse(text);
+      url = json?.files?.[0]?.url || json?.url;
+    } catch (_) {
+      // Fall back to plain-text URL (some qu.ax responses are bare URLs)
+      url = text.startsWith('https://') ? text : null;
+    }
+
+    if (!url) {
+      return res.status(502).json({ error: `Unexpected qu.ax response: ${text}` });
+    }
+
+    res.json({ url });
+  } catch (err) {
+    console.error('[qu.ax] Upload error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/clipper/clip/:jobId/buzzheavier
+ * Server-side proxy: uploads the finished mp4 to BuzzHeavier via HTTP PUT.
+ * Uses BUZZHEAVIER_ACCOUNT_ID as the Bearer token and BUZZHEAVIER_PARENT_ID
+ * as the parent-folder segment in the URL.
+ * Returns: { url } on success.
+ *
+ * BuzzHeavier endpoint: PUT https://w.buzzheavier.com/{parentId}/{filename}
+ * Authorization: Bearer {accountId}
+ */
+router.post('/clip/:jobId/buzzheavier', async (req, res) => {
+  if (!BUZZHEAVIER_ACCOUNT_ID) {
+    return res.status(503).json({ error: 'BUZZHEAVIER_ACCOUNT_ID is not configured' });
+  }
+
+  const job = jobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  const filePath = job.outputFile;
+  if (!filePath || !fs.existsSync(filePath)) {
+    return res.status(410).json({ error: 'Clip file not found on disk' });
+  }
+
+  try {
+    const fileBuffer = fs.readFileSync(filePath);
+    const filename   = `clip_${job.platform}_${job.username}_${job.duration}s.mp4`;
+    const uploadUrl  = `https://w.buzzheavier.com/${BUZZHEAVIER_PARENT_ID}/${encodeURIComponent(filename)}`;
+
+    console.log(`[BuzzHeavier] Uploading ${filename} — ${(fileBuffer.length / 1048576).toFixed(1)} MB → ${uploadUrl}`);
+
+    const bhRes = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Authorization':  `Bearer ${BUZZHEAVIER_ACCOUNT_ID}`,
+        'Content-Type':   'video/mp4',
+        'Content-Length': String(fileBuffer.length),
+        'User-Agent':     process.env.USER_AGENT || 'Mozilla/5.0',
+      },
+      body: fileBuffer,
+    });
+
+    const text = (await bhRes.text()).trim();
+    console.log(`[BuzzHeavier] Response ${bhRes.status}: ${text.slice(0, 200)}`);
+
+    if (!bhRes.ok) {
+      return res.status(502).json({ error: `BuzzHeavier HTTP ${bhRes.status}: ${text}` });
+    }
+
+    // BuzzHeavier returns JSON with the file's public URL or id
+    let url;
+    try {
+      const json = JSON.parse(text);
+      // Try common response shapes
+      url = json?.data?.downloadPage
+        || json?.data?.url
+        || json?.url
+        || (json?.id ? `https://buzzheavier.com/${json.id}` : null);
+    } catch (_) {
+      url = text.startsWith('https://') ? text : null;
+    }
+
+    if (!url) {
+      return res.status(502).json({ error: `Unexpected BuzzHeavier response: ${text}` });
+    }
+
+    res.json({ url });
+  } catch (err) {
+    console.error('[BuzzHeavier] Upload error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /**
