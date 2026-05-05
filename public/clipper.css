@@ -641,3 +641,200 @@ footer {
   font-family: 'JetBrains Mono', monospace;
   text-align: center;
 }
+/* ── Catbox upload section ── */
+.catbox-upload-section {
+  margin-top: 20px;
+}
+
+.catbox-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.catbox-divider::before,
+.catbox-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.catbox-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn-catbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background: var(--bg-raised);
+  border: 1px solid var(--blue);
+  border-radius: var(--radius);
+  color: var(--blue);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.btn-catbox:hover:not(:disabled) {
+  background: rgba(74,158,255,0.12);
+}
+
+.btn-catbox:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.catbox-status {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.catbox-success { color: var(--green); }
+.catbox-err     { color: var(--red); }
+
+.catbox-result {
+  display: none;
+  margin-top: 12px;
+}
+
+.catbox-result.visible { display: block; }
+
+.btn-open {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: rgba(74,158,255,0.10);
+  border: 1px solid var(--blue);
+  border-radius: var(--radius);
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: 'Barlow Condensed', sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.btn-open:hover { background: rgba(74,158,255,0.20); }
+/* ── Three-button result row ── */
+.result-actions-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.result-actions-row .btn-download,
+.result-actions-row .btn-catbox,
+.result-actions-row .btn-secondary {
+  flex: 1;
+  justify-content: center;
+  white-space: nowrap;
+  font-size: 13px;
+  padding: 10px 10px;
+}
+
+.catbox-status-row {
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.catbox-result {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.catbox-result.visible { display: flex; }
+
+.catbox-url-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  word-break: break-all;
+  text-align: center;
+}
+
+/* ── Mobile Responsiveness ── */
+@media (max-width: 600px) {
+  /* Reduce outer body padding for smaller screens */
+  body {
+    padding: 20px 15px 30px;
+  }
+
+  /* Scale down the main header slightly */
+  header h1 {
+    font-size: 26px;
+  }
+
+  /* Make platform chips slightly more compact so they fit better in a row */
+  .platform-chip {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  /* Stack the Duration and Quality inputs instead of the 1fr 1fr grid */
+  .controls-row {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  /* Adjust capture button for touch targets */
+  .btn-capture {
+    font-size: 16px;
+    padding: 12px;
+  }
+
+  /* Stack the three-button result row on smaller screens */
+  .result-actions-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .result-actions-row .btn-download,
+  .result-actions-row .btn-catbox,
+  .result-actions-row .btn-secondary {
+    width: 100%;
+    padding: 12px;
+  }
+
+  /* Ensure the video preview scales well without being too tall */
+  #clip-preview {
+    max-height: 240px;
+  }
+  
+  /* Shrink text in the stream preview label to prevent overflow */
+  .stream-preview-label {
+    font-size: 10px;
+    padding: 6px 10px;
+  }
+}

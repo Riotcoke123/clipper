@@ -2,8 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Prevent unwanted scaling on mobile inputs -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<!-- Match the browser UI to your dark background base -->
+<meta name="theme-color" content="#0c0e14">
+<meta name="description" content="Stream Clipper - Clip anything from YouTube, Twitch, Kick, and Odysee.">
 <title>Stream Clipper</title>
+
+<!-- Favicons & Manifest -->
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="clipper.css">
@@ -85,7 +96,7 @@
       </div>
       <div class="control-block">
         <label>Quality</label>
-        <select id="quality-select">
+        <select id="quality-select" title="Quality">
           <option value="low">Low — 360p</option>
           <option value="medium" selected>Medium — 720p</option>
           <option value="high">High — 1080p</option>
@@ -129,17 +140,57 @@
       <div class="preview-meta" id="preview-meta"></div>
     </div>
 
-    <div class="result-row">
-      <input class="clip-url-input" type="text" id="clip-url-field" readonly value="">
-      <button class="btn-copy" id="copy-btn">Copy</button>
+    <div class="result-actions-row">
       <a class="btn-download" id="download-link" href="#">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Download
       </a>
+      <button class="btn-catbox" id="catbox-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+        Catbox
+      </button>
+      <button class="btn-catbox" id="quax-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+        qu.ax
+      </button>
+      <button class="btn-catbox" id="buzzheavier-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+        BuzzHeavier
+      </button>
+      <button class="btn-secondary" id="new-clip-btn">Clip another stream</button>
     </div>
 
-    <div class="new-clip-row" style="margin-top: 18px;">
-      <button class="btn-secondary" id="new-clip-btn">Clip another stream</button>
+    <div class="catbox-status-row">
+      <span class="catbox-status" id="catbox-status"></span>
+    </div>
+    <div class="catbox-result" id="catbox-result">
+      <a class="btn-open" id="catbox-open-link" href="#" target="_blank" rel="noopener noreferrer">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        Open on Catbox
+      </a>
+      <span class="catbox-url-text" id="catbox-url-text"></span>
+    </div>
+
+    <div class="catbox-status-row">
+      <span class="catbox-status" id="quax-status"></span>
+    </div>
+    <div class="catbox-result" id="quax-result">
+      <a class="btn-open" id="quax-open-link" href="#" target="_blank" rel="noopener noreferrer">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        Open on qu.ax
+      </a>
+      <span class="catbox-url-text" id="quax-url-text"></span>
+    </div>
+
+    <div class="catbox-status-row">
+      <span class="catbox-status" id="buzzheavier-status"></span>
+    </div>
+    <div class="catbox-result" id="buzzheavier-result">
+      <a class="btn-open" id="buzzheavier-open-link" href="#" target="_blank" rel="noopener noreferrer">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        Open on BuzzHeavier
+      </a>
+      <span class="catbox-url-text" id="buzzheavier-url-text"></span>
     </div>
   </div>
 
@@ -151,6 +202,7 @@
   /* ── State ── */
   let activePlatform = 'youtube';
   let pollInterval = null;
+  let currentJobId = null;
 
   const PLATFORM_HINTS = {
     youtube: 'e.g. mkbhd — or paste a full YouTube live URL',
@@ -180,8 +232,6 @@
   const errorBox      = document.getElementById('error-box');
   const cancelBtn     = document.getElementById('cancel-btn');
 
-  const clipUrlField  = document.getElementById('clip-url-field');
-  const copyBtn       = document.getElementById('copy-btn');
   const downloadLink  = document.getElementById('download-link');
   const newClipBtn    = document.getElementById('new-clip-btn');
   const clipPreview   = document.getElementById('clip-preview');
@@ -212,7 +262,10 @@
       case 'youtube': {
         // extract video ID from watch URL, /live/ URL, or youtu.be
         const m = v.match(/(?:[?&]v=|\/live\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-        if (m) return `https://www.youtube.com/embed/${m[1]}?autoplay=1&mute=1`;
+        if (m) {
+          const origin = encodeURIComponent(window.location.origin || 'http://localhost');
+          return `https://www.youtube.com/embed/${m[1]}?autoplay=1&mute=1&enablejsapi=1&origin=${origin}`;
+        }
         return null; // handle-only — can't embed without video ID
       }
       case 'odysee': {
@@ -245,6 +298,46 @@
     clearTimeout(previewDebounce);
     previewDebounce = setTimeout(updateStreamPreview, 600);
   }
+
+  /* ── YouTube iframe error listener (catches Error 153 = not embeddable) ── */
+  // YouTube only sends postMessage error events when the player has an active
+  // subscription. We trigger that by sending a 'listening' ping to the iframe
+  // after it loads. Without this, YouTube renders its own Error 153 screen
+  // inside the iframe instead of letting us intercept and show our fallback.
+  streamPreviewIframe.addEventListener('load', () => {
+    if (activePlatform !== 'youtube') return;
+    try {
+      streamPreviewIframe.contentWindow.postMessage(
+        JSON.stringify({ event: 'listening', id: 1 }),
+        'https://www.youtube.com'
+      );
+    } catch (_) {}
+  });
+
+  // YouTube sends JSON postMessages when the player state changes.
+  // Error codes: 2=bad videoId, 5=HTML5 error, 100=not found,
+  //              101/150=not embeddable, 153=playback disallowed.
+  window.addEventListener('message', (evt) => {
+    if (!evt.data) return;
+    // Only care about messages from YouTube
+    if (evt.origin && evt.origin !== 'https://www.youtube.com') return;
+    let msg;
+    try { msg = typeof evt.data === 'string' ? JSON.parse(evt.data) : evt.data; } catch (_) { return; }
+
+    const isYTError = msg?.event === 'onError'
+      || (msg?.event === 'infoDelivery' && msg?.info?.error);
+    if (!isYTError) return;
+
+    const errCode = msg?.info?.error ?? msg?.info;
+    if ([2, 5, 100, 101, 150, 153].includes(errCode)) {
+      streamPreviewIframe.style.display = 'none';
+      streamPreviewUnavail.textContent =
+        [101, 150, 153].includes(errCode)
+          ? `Embedding disabled by channel (Error ${errCode}) — preview unavailable, but clipping will still work.`
+          : `YouTube player error ${errCode} — preview unavailable, but clipping will still work.`;
+      streamPreviewUnavail.classList.add('visible');
+    }
+  });
 
   function updateStreamPreview() {
     const v = usernameInput.value.trim();
@@ -341,6 +434,7 @@
       if (!res.ok) throw new Error(data.error || 'Request failed');
 
       jobIdLine.textContent = 'job: ' + data.jobId;
+      currentJobId = data.jobId;
       startPolling(data.jobId);
     } catch (err) {
       setStatus('error', 'Submit failed');
@@ -348,20 +442,92 @@
     }
   });
 
-  /* ── Cancel / new clip ── */
+  const catboxBtn      = document.getElementById('catbox-btn');
+  const catboxStatus   = document.getElementById('catbox-status');
+  const catboxResult   = document.getElementById('catbox-result');
+  const catboxOpenLink = document.getElementById('catbox-open-link');
+  const catboxUrlText  = document.getElementById('catbox-url-text');
+
+  const quaxBtn      = document.getElementById('quax-btn');
+  const quaxStatus   = document.getElementById('quax-status');
+  const quaxResult   = document.getElementById('quax-result');
+  const quaxOpenLink = document.getElementById('quax-open-link');
+  const quaxUrlText  = document.getElementById('quax-url-text');
+
+  const buzzBtn      = document.getElementById('buzzheavier-btn');
+  const buzzStatus   = document.getElementById('buzzheavier-status');
+  const buzzResult   = document.getElementById('buzzheavier-result');
+  const buzzOpenLink = document.getElementById('buzzheavier-open-link');
+  const buzzUrlText  = document.getElementById('buzzheavier-url-text');
+
+  /* ── Catbox upload ── */
+  catboxBtn.addEventListener('click', async () => {
+    catboxBtn.disabled = true;
+    catboxStatus.innerHTML = '<span class="spinner"></span> Uploading to Catbox…';
+
+    try {
+      if (!currentJobId) throw new Error('No clip job active');
+
+      const res = await fetch(`/api/clipper/clip/${currentJobId}/catbox`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+
+      catboxOpenLink.href = data.url;
+      catboxUrlText.textContent = data.url;
+      catboxResult.classList.add('visible');
+      catboxStatus.innerHTML = '<span class="catbox-success">✓ Uploaded!</span>';
+    } catch (err) {
+      catboxStatus.innerHTML = `<span class="catbox-err">! ${err.message}</span>`;
+      catboxBtn.disabled = false;
+    }
+  });
+
+  /* ── qu.ax upload ── */
+  quaxBtn.addEventListener('click', async () => {
+    quaxBtn.disabled = true;
+    quaxStatus.innerHTML = '<span class="spinner"></span> Uploading to qu.ax…';
+
+    try {
+      if (!currentJobId) throw new Error('No clip job active');
+
+      const res = await fetch(`/api/clipper/clip/${currentJobId}/quax`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+
+      quaxOpenLink.href = data.url;
+      quaxUrlText.textContent = data.url;
+      quaxResult.classList.add('visible');
+      quaxStatus.innerHTML = '<span class="catbox-success">✓ Uploaded!</span>';
+    } catch (err) {
+      quaxStatus.innerHTML = `<span class="catbox-err">! ${err.message}</span>`;
+      quaxBtn.disabled = false;
+    }
+  });
+
+  /* ── BuzzHeavier upload ── */
+  buzzBtn.addEventListener('click', async () => {
+    buzzBtn.disabled = true;
+    buzzStatus.innerHTML = '<span class="spinner"></span> Uploading to BuzzHeavier…';
+
+    try {
+      if (!currentJobId) throw new Error('No clip job active');
+
+      const res = await fetch(`/api/clipper/clip/${currentJobId}/buzzheavier`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+
+      buzzOpenLink.href = data.url;
+      buzzUrlText.textContent = data.url;
+      buzzResult.classList.add('visible');
+      buzzStatus.innerHTML = '<span class="catbox-success">✓ Uploaded!</span>';
+    } catch (err) {
+      buzzStatus.innerHTML = `<span class="catbox-err">! ${err.message}</span>`;
+      buzzBtn.disabled = false;
+    }
+  });
+
   cancelBtn.addEventListener('click', reset);
   newClipBtn.addEventListener('click', reset);
-
-  /* ── Copy ── */
-  copyBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(clipUrlField.value).catch(() => {});
-    copyBtn.textContent = 'Copied!';
-    copyBtn.classList.add('copied');
-    setTimeout(() => {
-      copyBtn.textContent = 'Copy';
-      copyBtn.classList.remove('copied');
-    }, 2000);
-  });
 
   /* ── Polling ── */
   function startPolling(jobId) {
@@ -423,13 +589,19 @@
     progressCard.classList.remove('visible');
     resultCard.classList.add('visible');
     const downloadUrl = `/api/clipper/clip/${job.id}/download`;
-    clipUrlField.value = window.location.origin + downloadUrl;
     downloadLink.href = downloadUrl;
 
     // Video preview — use the static clips URL so it doesn't trigger delete
     const previewSrc = job.downloadUrl || downloadUrl;
     clipPreview.src = previewSrc;
+    clipPreview.muted = true;          // allow autoplay in all browsers
+    clipPreview.autoplay = true;
     clipPreview.load();
+
+    // Show an inline error if the video fails to load
+    clipPreview.addEventListener('error', () => {
+      previewMeta.innerHTML = `<span class="meta-pill" style="color:var(--red)">⚠ Preview failed — use Download</span>`;
+    }, { once: true });
 
     // Build meta line once video metadata is available
     previewMeta.innerHTML = `<span class="meta-pill green">✓ ready</span>
@@ -464,6 +636,22 @@
     streamPreviewIframe.src = 'about:blank';
     streamPreviewUnavail.classList.remove('visible');
     usernameInput.value = '';
+    catboxBtn.disabled = false;
+    catboxStatus.innerHTML = '';
+    catboxResult.classList.remove('visible');
+    catboxUrlText.textContent = '';
+    catboxOpenLink.href = '#';
+    quaxBtn.disabled = false;
+    quaxStatus.innerHTML = '';
+    quaxResult.classList.remove('visible');
+    quaxUrlText.textContent = '';
+    quaxOpenLink.href = '#';
+    buzzBtn.disabled = false;
+    buzzStatus.innerHTML = '';
+    buzzResult.classList.remove('visible');
+    buzzUrlText.textContent = '';
+    buzzOpenLink.href = '#';
+    currentJobId = null;
   }
 
   function setStatus(state, msgHtml) {
