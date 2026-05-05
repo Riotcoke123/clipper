@@ -6,7 +6,6 @@
             A high-performance, multi-platform live stream clipping engine powered by <strong>Node.js</strong>, <strong>FFmpeg</strong>, and <strong>SQLite</strong>.
         </p>
     </header>
-
     <section id="features">
         <h2>🚀 Core Features</h2>
         <div class="grid">
@@ -28,7 +27,6 @@
             </div>
         </div>
     </section>
-
     <section id="config">
         <h2>🛠 Environment Setup</h2>
         <p>Define these variables in your <code>.env</code> file to customize the engine:</p>
@@ -64,23 +62,19 @@
             </tbody>
         </table>
     </section>
-
     <section id="integration">
         <h2>💻 Integration</h2>
         <h3>As an Express Module</h3>
         <pre><code>const express = require('express');
 const clipper = require('./clipper');
 const app = express();
-
 app.use(express.json());
 // Mount the clipper API
 app.use('/api/clipper', clipper.router);[cite: 1, 3]</code></pre>
-
         <h3>Standalone Execution</h3>
         <p>Launch the built-in server on port <code>4242</code>[cite: 1, 3]:</p>
         <pre><code>node clipper.js</code></pre>
     </section>
-
     <section id="api">
         <h2>📡 API Reference</h2>
         <h3><code>POST /api/clipper/clip</code></h3>
@@ -91,14 +85,11 @@ app.use('/api/clipper', clipper.router);[cite: 1, 3]</code></pre>
   "duration": 60,
   "quality": "high"
 }</code></pre>
-
         <h3><code>GET /api/clipper/clip/:jobId</code></h3>
         <p>Poll for status. Stages: <span class="badge">pending</span> <span class="badge">resolving</span> <span class="badge">capturing</span> <span class="badge">encoding</span> <span class="badge">ready</span>[cite: 3].</p>
-
         <h3><code>POST /api/clipper/clip/:jobId/catbox</code></h3>
         <p>Server-side proxy to upload the finished clip to Catbox anonymously[cite: 3].</p>
     </section>
-
     <footer style="margin-top: 80px; text-align: center; color: var(--text-dim); font-family: 'JetBrains Mono'; font-size: 0.8rem;">
         &copy; 2026 Stream Clipper Engine · Powered by Node.js & FFmpeg
     </footer>
