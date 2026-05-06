@@ -45,8 +45,6 @@ const ODYSEE_LIVE_API  = process.env.ODYSEE_LIVE_API  || 'https://api.odysee.liv
 const ODYSEE_SDK_PROXY = process.env.ODYSEE_SDK_PROXY || 'https://api.na-backend.odysee.com';
 const ODYSEE_COOKIE    = process.env.ODYSEE_COOKIE    || '';
 const CATBOX_USERHASH        = process.env.CATBOX_USERHASH        || '';
-const BUZZHEAVIER_ACCOUNT_ID = process.env.BUZZHEAVIER_ACCOUNT_ID || '';
-const BUZZHEAVIER_PARENT_ID  = process.env.BUZZHEAVIER_PARENT_ID  || BUZZHEAVIER_ACCOUNT_ID;
 const MAX_CLIP_SECONDS  = Number(process.env.MAX_CLIP_SECONDS)  || 300;
 const DEFAULT_CLIP_SECS = Number(process.env.DEFAULT_CLIP_SECS) || 60;
 const DB_PATH           = process.env.DB_PATH || path.join(__dirname, 'clipper.db');
@@ -424,6 +422,9 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
     const args = [
       '--no-playlist',
       '--no-check-certificate',
+      '--socket-timeout', '20',      // fail fast per TCP op — prevents LBRY/Odysee hangs
+      '--retries', '3',              // retry fragment/manifest fetches up to 3×
+      '--fragment-retries', '3',
       '--format', formatArg,
       '--downloader', 'ffmpeg',
       '--downloader-args', `ffmpeg:-t ${duration}`,
@@ -762,78 +763,6 @@ router.post('/clip/:jobId/quax', async (req, res) => {
     res.json({ url });
   } catch (err) {
     console.error('[qu.ax] Upload error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * POST /api/clipper/clip/:jobId/buzzheavier
- * Server-side proxy: uploads the finished mp4 to BuzzHeavier via HTTP PUT.
- * Uses BUZZHEAVIER_ACCOUNT_ID as the Bearer token and BUZZHEAVIER_PARENT_ID
- * as the parent-folder segment in the URL.
- * Returns: { url } on success.
- *
- * BuzzHeavier endpoint: PUT https://w.buzzheavier.com/{parentId}/{filename}
- * Authorization: Bearer {accountId}
- */
-router.post('/clip/:jobId/buzzheavier', async (req, res) => {
-  if (!BUZZHEAVIER_ACCOUNT_ID) {
-    return res.status(503).json({ error: 'BUZZHEAVIER_ACCOUNT_ID is not configured' });
-  }
-
-  const job = jobs.get(req.params.jobId);
-  if (!job) return res.status(404).json({ error: 'Job not found' });
-
-  const filePath = job.outputFile;
-  if (!filePath || !fs.existsSync(filePath)) {
-    return res.status(410).json({ error: 'Clip file not found on disk' });
-  }
-
-  try {
-    const fileBuffer = fs.readFileSync(filePath);
-    const filename   = `clip_${job.platform}_${job.username}_${job.duration}s.mp4`;
-    const uploadUrl  = `https://w.buzzheavier.com/${BUZZHEAVIER_PARENT_ID}/${encodeURIComponent(filename)}`;
-
-    console.log(`[BuzzHeavier] Uploading ${filename} — ${(fileBuffer.length / 1048576).toFixed(1)} MB → ${uploadUrl}`);
-
-    const bhRes = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: {
-        'Authorization':  `Bearer ${BUZZHEAVIER_ACCOUNT_ID}`,
-        'Content-Type':   'video/mp4',
-        'Content-Length': String(fileBuffer.length),
-        'User-Agent':     process.env.USER_AGENT || 'Mozilla/5.0',
-      },
-      body: fileBuffer,
-    });
-
-    const text = (await bhRes.text()).trim();
-    console.log(`[BuzzHeavier] Response ${bhRes.status}: ${text.slice(0, 200)}`);
-
-    if (!bhRes.ok) {
-      return res.status(502).json({ error: `BuzzHeavier HTTP ${bhRes.status}: ${text}` });
-    }
-
-    // BuzzHeavier returns JSON with the file's public URL or id
-    let url;
-    try {
-      const json = JSON.parse(text);
-      // Try common response shapes
-      url = json?.data?.downloadPage
-        || json?.data?.url
-        || json?.url
-        || (json?.id ? `https://buzzheavier.com/${json.id}` : null);
-    } catch (_) {
-      url = text.startsWith('https://') ? text : null;
-    }
-
-    if (!url) {
-      return res.status(502).json({ error: `Unexpected BuzzHeavier response: ${text}` });
-    }
-
-    res.json({ url });
-  } catch (err) {
-    console.error('[BuzzHeavier] Upload error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
