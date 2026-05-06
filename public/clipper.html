@@ -153,10 +153,6 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
         qu.ax
       </button>
-      <button class="btn-catbox" id="buzzheavier-btn">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
-        BuzzHeavier
-      </button>
       <button class="btn-secondary" id="new-clip-btn">Clip another stream</button>
     </div>
 
@@ -180,17 +176,6 @@
         Open on qu.ax
       </a>
       <span class="catbox-url-text" id="quax-url-text"></span>
-    </div>
-
-    <div class="catbox-status-row">
-      <span class="catbox-status" id="buzzheavier-status"></span>
-    </div>
-    <div class="catbox-result" id="buzzheavier-result">
-      <a class="btn-open" id="buzzheavier-open-link" href="#" target="_blank" rel="noopener noreferrer">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-        Open on BuzzHeavier
-      </a>
-      <span class="catbox-url-text" id="buzzheavier-url-text"></span>
     </div>
   </div>
 
@@ -330,12 +315,11 @@
 
     const errCode = msg?.info?.error ?? msg?.info;
     if ([2, 5, 100, 101, 150, 153].includes(errCode)) {
-      streamPreviewIframe.style.display = 'none';
-      streamPreviewUnavail.textContent =
-        [101, 150, 153].includes(errCode)
-          ? `Embedding disabled by channel (Error ${errCode}) — preview unavailable, but clipping will still work.`
-          : `YouTube player error ${errCode} — preview unavailable, but clipping will still work.`;
-      streamPreviewUnavail.classList.add('visible');
+      // Embedding blocked (101/150/153) or unplayable (2/5/100):
+      // silently collapse the preview — no error banner, clipping is unaffected.
+      streamPreviewWrap.classList.remove('visible');
+      streamPreviewIframe.src = 'about:blank';
+      streamPreviewUnavail.classList.remove('visible');
     }
   });
 
@@ -454,12 +438,6 @@
   const quaxOpenLink = document.getElementById('quax-open-link');
   const quaxUrlText  = document.getElementById('quax-url-text');
 
-  const buzzBtn      = document.getElementById('buzzheavier-btn');
-  const buzzStatus   = document.getElementById('buzzheavier-status');
-  const buzzResult   = document.getElementById('buzzheavier-result');
-  const buzzOpenLink = document.getElementById('buzzheavier-open-link');
-  const buzzUrlText  = document.getElementById('buzzheavier-url-text');
-
   /* ── Catbox upload ── */
   catboxBtn.addEventListener('click', async () => {
     catboxBtn.disabled = true;
@@ -501,28 +479,6 @@
     } catch (err) {
       quaxStatus.innerHTML = `<span class="catbox-err">! ${err.message}</span>`;
       quaxBtn.disabled = false;
-    }
-  });
-
-  /* ── BuzzHeavier upload ── */
-  buzzBtn.addEventListener('click', async () => {
-    buzzBtn.disabled = true;
-    buzzStatus.innerHTML = '<span class="spinner"></span> Uploading to BuzzHeavier…';
-
-    try {
-      if (!currentJobId) throw new Error('No clip job active');
-
-      const res = await fetch(`/api/clipper/clip/${currentJobId}/buzzheavier`, { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
-
-      buzzOpenLink.href = data.url;
-      buzzUrlText.textContent = data.url;
-      buzzResult.classList.add('visible');
-      buzzStatus.innerHTML = '<span class="catbox-success">✓ Uploaded!</span>';
-    } catch (err) {
-      buzzStatus.innerHTML = `<span class="catbox-err">! ${err.message}</span>`;
-      buzzBtn.disabled = false;
     }
   });
 
@@ -646,11 +602,6 @@
     quaxResult.classList.remove('visible');
     quaxUrlText.textContent = '';
     quaxOpenLink.href = '#';
-    buzzBtn.disabled = false;
-    buzzStatus.innerHTML = '';
-    buzzResult.classList.remove('visible');
-    buzzUrlText.textContent = '';
-    buzzOpenLink.href = '#';
     currentJobId = null;
   }
 
