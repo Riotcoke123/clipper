@@ -76,7 +76,6 @@
           id="stream-preview-iframe"
           allowfullscreen
           allow="autoplay; encrypted-media"
-          referrerpolicy="no-referrer"
           frameborder="0"
         ></iframe>
       </div>
@@ -245,13 +244,15 @@
         return `https://player.kick.com/${encodeURIComponent(user)}`;
       }
       case 'youtube': {
-        // extract video ID from watch URL, /live/ URL, or youtu.be
-        const m = v.match(/(?:[?&]v=|\/live\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-        if (m) {
+        // Extract video ID from all common YouTube URL formats:
+        //   watch?v=ID, /live/ID, youtu.be/ID, /shorts/ID, /embed/ID, /v/ID
+        const m = v.match(/(?:[?&]v=|\/(?:live|shorts|embed|v)\/)([a-zA-Z0-9_-]{11})|youtu\.be\/([a-zA-Z0-9_-]{11})/);
+        const videoId = m && (m[1] || m[2]);
+        if (videoId) {
           const origin = encodeURIComponent(window.location.origin || 'http://localhost');
-          return `https://www.youtube.com/embed/${m[1]}?autoplay=1&mute=1&enablejsapi=1&origin=${origin}`;
+          return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&enablejsapi=1&origin=${origin}`;
         }
-        return null; // handle-only — can't embed without video ID
+        return null; // channel handle or @/live URL — can't embed without a video ID
       }
       case 'odysee': {
         // Odysee embed uses /$/embed/<name>/<claimId>
