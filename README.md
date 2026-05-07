@@ -25,7 +25,7 @@
 ├── deploy.sh            # One-touch Ubuntu deployment script
 ├── harden.sh            # Security and firewall configuration
 └── ecosystem.config.js  # PM2 process management
-    </code>section>
+    </section>
 <section>
     <h2>Deployment</h2>
     <p>
