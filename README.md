@@ -1,3 +1,9 @@
+
+<header>
+    <h1>Stream Clipper</h1>
+    <p>High-performance automated highlight capture for live broadcasts.</p>
+</header>
+
 <section>
     <h2>Overview</h2>
     <p>
@@ -18,23 +24,24 @@
 
 <section>
     <h2>Project Structure</h2>
-    <pre><code>├── clipper.js           # Core Express router & job logic
+<pre><code>├── clipper.js           # Core Express router & job logic
 ├── public/
 │   ├── clipper.html     # Responsive frontend UI
 │   └── clipper.css      # Custom styling & dark mode
 ├── deploy.sh            # One-touch Ubuntu deployment script
 ├── harden.sh            # Security and firewall configuration
-└── ecosystem.config.js  # PM2 process management
-    </section>
+└── ecosystem.config.js  # PM2 process management</code></pre>
+</section>
+
 <section>
     <h2>Deployment</h2>
     <p>
         The project includes a <code>deploy.sh</code> script that automates the installation of Node.js 20, FFmpeg, Nginx, and SSL certificates via Certbot.
     </p>
-    <pre><code># Deploy to an Ubuntu/Debian server
+<pre><code># Deploy to an Ubuntu/Debian server
 git clone https://github.com/Riotcoke123/clipper.git
 cd clipper
-bash deploy.sh
+bash deploy.sh</code></pre>
     <h3>Production Maintenance</h3>
     <p>Manage the application lifecycle using the included PM2 configuration:</p>
     <ul>
@@ -47,29 +54,33 @@ bash deploy.sh
 <section>
     <h2>Configuration</h2>
     <p>Modify behavior via environment variables or a <code>.env</code> file:</p>
-    <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
-        <tr style="border-bottom: 1px solid #2a2f42; text-align: left;">
-            <th style="padding: 8px;">Variable</th>
-            <th style="padding: 8px;">Description</th>
-        </tr>
-        <tr>
-            <td style="padding: 8px;"><code>MAX_CLIP_SECONDS</code></td>
-            <td style="padding: 8px;">Maximum length of a single clip (Default: 300s)</td>
-        </tr>
-        <tr>
-            <td style="padding: 8px;"><code>CLIP_OUTPUT_DIR</code></td>
-            <td style="padding: 8px;">Path where processed MP4s are stored</td>
-        </tr>
-        <tr>
-            <td style="padding: 8px;"><code>DB_PATH</code></td>
-            <td style="padding: 8px;">Path to the SQLite database file</td>
-        </tr>
+    <table>
+        <thead>
+            <tr>
+                <th>Variable</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>MAX_CLIP_SECONDS</code></td>
+                <td>Maximum length of a single clip (Default: 300s)</td>
+            </tr>
+            <tr>
+                <td><code>CLIP_OUTPUT_DIR</code></td>
+                <td>Path where processed MP4s are stored</td>
+            </tr>
+            <tr>
+                <td><code>DB_PATH</code></td>
+                <td>Path to the SQLite database file</td>
+            </tr>
+        </tbody>
     </table>
 </section>
 
 <footer>
-    <hr style="border: 0; border-top: 1px solid #2a2f42; margin: 40px 0 20px;">
-    <p style="font-size: 0.85rem; color: #3d4560; text-align: center;">
-        &copy; 2024 Riotcoke123 &bull; Licensed under ISC
-    </p>
+    <p>&copy; 2024 Riotcoke123 &bull; Licensed under ISC</p>
 </footer>
+
+</body>
+</html>
