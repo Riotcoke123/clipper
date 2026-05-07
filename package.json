@@ -1,11 +1,15 @@
 {
   "name": "clipper",
-  "version": "1.0.0",
-  "description": "Multi-platform live stream clipper",
+  "version": "1.1.0",
+  "description": "Multi-platform live stream clipper for YouTube, Twitch, Kick, and Odysee",
   "main": "clipper.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node clipper.js"
+    "start": "node clipper.js",
+    "dev": "nodemon clipper.js",
+    "prod": "pm2 start clipper.js --name clipper-api",
+    "stop": "pm2 stop clipper-api",
+    "logs": "pm2 logs clipper-api"
   },
   "repository": {
     "type": "git",
@@ -15,10 +19,14 @@
   "license": "ISC",
   "dependencies": {
     "better-sqlite3": "^12.9.0",
+    "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "fluent-ffmpeg": "^2.1.3",
     "node-fetch": "^3.3.2",
-    "uuid": "^14.0.0"
+    "uuid": "^11.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
   }
 }
