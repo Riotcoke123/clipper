@@ -4,22 +4,22 @@
  * Supported platforms: YouTube · Twitch · Kick · Odysee
  *
  * Mount as an Express router:
- *   const clipper = require('./clipper');
- *   app.use('/api/clipper', clipper.router);
+ * const clipper = require('./clipper');
+ * app.use('/api/clipper', clipper.router);
  *
  * Or run standalone:
- *   node clipper.js
+ * node clipper.js
  *
  * Environment variables (all optional — sensible defaults):
- *   CLIP_OUTPUT_DIR   — where finished .mp4 clips are stored   (default: ./public/clips)
- *   CLIP_TEMP_DIR     — scratch space during capture             (default: ./temp)
- *   KICK_API_BASE     — Kick public API root                     (default: https://api.kick.com)
- *   ODYSEE_LIVE_API   — Odysee live API root                     (default: https://api.odysee.live)
- *   ODYSEE_SDK_PROXY  — Odysee SDK proxy root                    (default: https://api.na-backend.odysee.com)
- *   ODYSEE_COOKIE     — auth cookie for Odysee (optional)
- *   MAX_CLIP_SECONDS  — hard cap on requested duration           (default: 300)
- *   DEFAULT_CLIP_SECS — fallback duration when none provided     (default: 60)
- *   DB_PATH           — path to the SQLite database file         (default: ./clipper.db)
+ * CLIP_OUTPUT_DIR   — where finished .mp4 clips are stored   (default: ./public/clips)
+ * CLIP_TEMP_DIR     — scratch space during capture             (default: ./temp)
+ * KICK_API_BASE     — Kick public API root                     (default: https://api.kick.com)
+ * ODYSEE_LIVE_API   — Odysee live API root                     (default: https://api.odysee.live)
+ * ODYSEE_SDK_PROXY  — Odysee SDK proxy root                    (default: https://api.na-backend.odysee.com)
+ * ODYSEE_COOKIE     — auth cookie for Odysee (optional)
+ * MAX_CLIP_SECONDS  — hard cap on requested duration           (default: 300)
+ * DEFAULT_CLIP_SECS — fallback duration when none provided     (default: 60)
+ * DB_PATH           — path to the SQLite database file         (default: ./clipper.db)
  */
 
 'use strict';
@@ -188,44 +188,10 @@ async function resolveTwitch(username) {
 }
 
 /**
- * Kick — use public v1 API to get the HLS playlist URL.
- * Falls back to yt-dlp if the API doesn't surface a playback URL.
+ * Kick — Use yt-dlp directly to handle format + auth in one shot
+ * during captureClip, bypassing Kick's strict 401/Cloudflare blocks.
  */
 async function resolveKick(username) {
-  try {
-    const res = await fetch(
-      `${KICK_API_BASE}/public/v1/channels?broadcaster_username=${encodeURIComponent(username)}`,
-      { headers: { 'Accept': 'application/json' } }
-    );
-    if (!res.ok) throw new Error(`Kick API ${res.status}`);
-    const json = await res.json();
-    const channel = json?.data?.[0];
-
-    if (!channel?.livestream?.is_live) throw new Error('Channel is not live');
-
-    // Prefer the HLS playback URL surfaced by the API
-    const playbackUrl = channel?.playback_url
-      || channel?.livestream?.playback_url
-      || channel?.livestream?.session?.playback_url;
-
-    if (playbackUrl) return { type: 'hls', url: playbackUrl };
-
-    // Fallback: old public v2 channel endpoint
-    const res2 = await fetch(
-      `https://kick.com/api/v2/channels/${encodeURIComponent(username)}`,
-      { headers: { 'Accept': 'application/json' } }
-    );
-    if (res2.ok) {
-      const j2 = await res2.json();
-      const m3u8 = j2?.livestream?.session?.playback_url
-        || j2?.playback_url;
-      if (m3u8) return { type: 'hls', url: m3u8 };
-    }
-  } catch (err) {
-    console.warn(`[Kick] API failed (${err.message}), falling back to yt-dlp`);
-  }
-
-  // Last resort: let yt-dlp resolve format + auth in one shot during captureClip
   return { type: 'ytdlp', url: `https://kick.com/${username}` };
 }
 
