@@ -49,6 +49,38 @@ const MAX_CLIP_SECONDS  = Number(process.env.MAX_CLIP_SECONDS)  || 300;
 const DEFAULT_CLIP_SECS = Number(process.env.DEFAULT_CLIP_SECS) || 60;
 const DB_PATH           = process.env.DB_PATH || path.join(__dirname, 'clipper.db');
 
+/* ── Security ─────────────────────────────────────────────── */
+// Set CLIPPER_API_KEY in your environment to require an Authorization header
+// on every mutating request (POST, DELETE).  Server will refuse to start without it.
+const API_KEY = process.env.CLIPPER_API_KEY || '';
+if (!API_KEY || API_KEY.length < 32) {
+  console.error(
+    '[Clipper] FATAL: CLIPPER_API_KEY must be set to a string of at least 32 characters.\n' +
+    '         Generate one with: node -e "require(\'crypto\').randomBytes(32).toString(\'hex\')|0 && process.stdout.write(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+  );
+  process.exit(1);
+}
+
+// Maximum simultaneous capture jobs (yt-dlp + ffmpeg processes).
+const MAX_CONCURRENT_JOBS = Number(process.env.MAX_CONCURRENT_JOBS) || 5;
+
+// Simple in-memory rate limiter: max requests per window per IP.
+const RATE_LIMIT_WINDOW_MS  = Number(process.env.RATE_LIMIT_WINDOW_MS)  || 60_000; // 1 min
+const RATE_LIMIT_MAX_REQ    = Number(process.env.RATE_LIMIT_MAX_REQ)    || 10;
+
+// Allowed HTTPS hostnames for user-supplied stream URLs (SSRF guard).
+// Add more if you need to support additional platforms.
+const ALLOWED_STREAM_HOSTS = new Set([
+  'www.youtube.com', 'youtube.com', 'm.youtube.com',
+  'www.twitch.tv',   'twitch.tv',
+  'kick.com',        'www.kick.com',
+  'odysee.com',      'www.odysee.com',
+]);
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const VALID_PLATFORMS = ['youtube', 'twitch', 'kick', 'odysee'];
+const VALID_QUALITIES  = ['low', 'medium', 'high'];
+
 /* Ensure directories exist */
 [CLIP_OUTPUT_DIR, CLIP_TEMP_DIR].forEach(d => {
   if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
@@ -163,6 +195,104 @@ function updateJob(id, patch) {
 }
 
 /* ============================================================
+   SECURITY HELPERS
+   ============================================================ */
+
+/**
+ * Sanitise a channel handle / username:
+ *  - strip leading/trailing whitespace
+ *  - cap length at 128 chars
+ *  - remove characters that are illegal in filenames or HTTP headers
+ */
+function sanitizeUsername(raw) {
+  if (typeof raw !== 'string') throw new Error('username must be a string');
+  const s = raw.trim();
+  if (!s) throw new Error('username is empty');
+  if (s.length > 128) throw new Error('username too long (max 128 chars)');
+  // Keep word chars, @, :, ., /, - — everything else becomes _
+  return s.replace(/[^\w@:./-]/g, '_');
+}
+
+/**
+ * SSRF guard — if the caller supplied a full URL, ensure it points to one of
+ * the known-good streaming hostnames and uses HTTPS.
+ */
+function assertSafeUrl(url) {
+  let parsed;
+  try { parsed = new URL(url); } catch (_) { throw new Error(`Invalid URL: ${url}`); }
+  if (parsed.protocol !== 'https:') {
+    throw new Error(`Only HTTPS URLs are allowed (got ${parsed.protocol})`);
+  }
+  if (!ALLOWED_STREAM_HOSTS.has(parsed.hostname)) {
+    throw new Error(`URL hostname not allowed: ${parsed.hostname}`);
+  }
+}
+
+/**
+ * Validate that a jobId looks like a v4 UUID before hitting the DB.
+ */
+function assertValidJobId(id) {
+  if (!UUID_RE.test(id)) {
+    const err = new Error('Invalid job ID');
+    err.status = 400;
+    throw err;
+  }
+}
+
+/**
+ * Escape a value for use in a Content-Disposition filename parameter.
+ */
+function safeFilename(name) {
+  return '"' + name.replace(/[\\"/\r\n]/g, '_') + '"';
+}
+
+/**
+ * Strip server-internal fields before sending a job to the client.
+ * Removes `outputFile` (absolute disk path) to avoid filesystem disclosure.
+ */
+function publicJob(job) {
+  if (!job) return null;
+  const { outputFile: _omit, ...rest } = job;
+  return rest;
+}
+
+/* ── Simple in-memory rate limiter ────────────────────────── */
+const _rateBuckets = new Map(); // ip → { count, resetAt }
+
+function rateLimitMiddleware(req, res, next) {
+  const ip  = req.ip || req.socket?.remoteAddress || 'unknown';
+  const now = Date.now();
+  let bucket = _rateBuckets.get(ip);
+  if (!bucket || now > bucket.resetAt) {
+    bucket = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+    _rateBuckets.set(ip, bucket);
+  }
+  bucket.count++;
+  if (bucket.count > RATE_LIMIT_MAX_REQ) {
+    res.setHeader('Retry-After', Math.ceil((bucket.resetAt - now) / 1000));
+    return res.status(429).json({ error: 'Too many requests — slow down' });
+  }
+  next();
+}
+// Prune stale buckets periodically to avoid memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, b] of _rateBuckets) { if (now > b.resetAt) _rateBuckets.delete(ip); }
+}, 300_000).unref();
+
+/* ── API-key guard (always enforced) ─────────────────────── */
+function apiKeyMiddleware(req, res, next) {
+  const provided = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+  if (!provided || provided !== API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized — valid API key required' });
+  }
+  next();
+}
+
+/* ── Active-job concurrency counter ──────────────────────── */
+let _activeJobs = 0;
+
+/* ============================================================
    PLATFORM: STREAM-URL RESOLVERS
    ============================================================ */
 
@@ -171,28 +301,34 @@ function updateJob(id, patch) {
  * Input:  channel URL or video URL (watch?v=…, /live/…, @handle)
  */
 async function resolveYouTube(username) {
-  // Normalise: bare handle → full URL
-  // Return the page URL directly — yt-dlp resolves format + auth in one shot
-  // during captureClip, avoiding signed-URL expiry from a two-step --get-url call.
-  const url = username.startsWith('http')
-    ? username
-    : `https://www.youtube.com/@${username}/live`;
+  let url;
+  if (username.startsWith('http')) {
+    assertSafeUrl(username); // SSRF guard
+    url = username;
+  } else {
+    // Bare handle — build a safe URL (no user-controlled host)
+    const handle = encodeURIComponent(username.replace(/^@/, ''));
+    url = `https://www.youtube.com/@${handle}/live`;
+  }
   return { type: 'ytdlp', url };
 }
 
 /**
  * Twitch — yt-dlp handles OAuth-less public stream extraction perfectly.
+ * We never accept a raw URL from the caller to prevent SSRF.
  */
 async function resolveTwitch(username) {
-  return { type: 'ytdlp', url: `https://www.twitch.tv/${username}` };
+  const handle = encodeURIComponent(username.replace(/^https?:\/\/[^/]+\//i, '').split('/')[0]);
+  return { type: 'ytdlp', url: `https://www.twitch.tv/${handle}` };
 }
 
 /**
- * Kick — Use yt-dlp directly to handle format + auth in one shot
- * during captureClip, bypassing Kick's strict 401/Cloudflare blocks.
+ * Kick — yt-dlp handles format + auth in one shot.
+ * We never pass a raw caller URL to avoid SSRF.
  */
 async function resolveKick(username) {
-  return { type: 'ytdlp', url: `https://kick.com/${username}` };
+  const handle = encodeURIComponent(username.replace(/^https?:\/\/[^/]+\//i, '').split('/')[0]);
+  return { type: 'ytdlp', url: `https://kick.com/${handle}` };
 }
 
 /**
@@ -254,9 +390,14 @@ async function resolveOdysee(username) {
   } catch (_) {}
 
   // 3. Fallback: let yt-dlp resolve format + auth in one shot during captureClip
-  const pageUrl = username.startsWith('http')
-    ? username
-    : `https://odysee.com/@${username.replace(/^@/, '')}`;
+  let pageUrl;
+  if (username.startsWith('http')) {
+    assertSafeUrl(username); // SSRF guard
+    pageUrl = username;
+  } else {
+    const handle = encodeURIComponent(username.replace(/^@/, ''));
+    pageUrl = `https://odysee.com/@${handle}`;
+  }
   return { type: 'ytdlp', url: pageUrl };
 }
 
@@ -272,7 +413,6 @@ function ytDlpGetUrl(pageUrl, extraArgs = []) {
     const args = [
       '--get-url',
       '--no-playlist',
-      '--no-check-certificate',
       ...extraArgs,
       pageUrl,
     ];
@@ -367,9 +507,6 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
   }
 
   // --- HLS / yt-dlp path: yt-dlp download → ffmpeg re-encode ---
-  // 'ytdlp' type passes the original page URL so yt-dlp handles auth + format
-  // resolution in a single invocation (avoids signed-URL expiry from --get-url).
-  // 'hls' type passes a direct manifest URL obtained from a platform API.
   const formatArg = quality === 'low'
     ? 'worst[protocol^=m3u8][height>=360]/worst[protocol^=m3u8]/worst[height>=360]/worst'
     : quality === 'high'
@@ -381,15 +518,12 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
   await new Promise((resolve, reject) => {
     updateJob(jobId, { status: 'capturing', progress: 2 });
 
-    // Kick's extractor requires browser impersonation to bypass bot detection.
-    // Needs curl_cffi: pip install curl_cffi  (or: pip install yt-dlp[default])
     const needsImpersonation = /kick\.com/i.test(stream.url);
 
     const args = [
       '--no-playlist',
-      '--no-check-certificate',
-      '--socket-timeout', '20',      // fail fast per TCP op — prevents LBRY/Odysee hangs
-      '--retries', '3',              // retry fragment/manifest fetches up to 3×
+      '--socket-timeout', '20',
+      '--retries', '3',
       '--fragment-retries', '3',
       '--format', formatArg,
       '--downloader', 'ffmpeg',
@@ -475,33 +609,51 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
 function startClip({ platform, username, duration, quality = 'medium' }) {
   if (!platform || !username) throw new Error('platform and username are required');
 
+  const normalPlatform = platform.toLowerCase();
+  if (!VALID_PLATFORMS.includes(normalPlatform)) {
+    throw new Error(`Unsupported platform: "${platform}"`);
+  }
+
+  const normalQuality = (quality || 'medium').toLowerCase();
+  if (!VALID_QUALITIES.includes(normalQuality)) {
+    throw new Error(`Invalid quality "${quality}". Valid: ${VALID_QUALITIES.join(', ')}`);
+  }
+
+  const safeUser = sanitizeUsername(username);
+
   const secs = Math.min(
     MAX_CLIP_SECONDS,
     Math.max(5, Number(duration) || DEFAULT_CLIP_SECS)
   );
 
-  const job = createJob(platform.toLowerCase(), username, secs);
+  if (_activeJobs >= MAX_CONCURRENT_JOBS) {
+    throw Object.assign(
+      new Error(`Server busy — max ${MAX_CONCURRENT_JOBS} concurrent jobs`),
+      { status: 503 }
+    );
+  }
+
+  const job = createJob(normalPlatform, safeUser, secs);
+  _activeJobs++;
 
   // Fire-and-forget — caller polls /clip/:id for status
   (async () => {
     try {
-      // Pre-write the downloadUrl so it's always present when status flips to 'ready'.
-      // Without this, the 1.2 s poller can see status=ready with downloadUrl=null,
-      // fall back to the /download endpoint, and have the clip deleted before the
-      // user can watch the preview.
       const downloadUrl = `/clips/clip_${job.id}.mp4`;
       updateJob(job.id, { status: 'resolving', progress: 1, downloadUrl });
 
-      const stream = await resolveStreamUrl(platform, username);
+      const stream = await resolveStreamUrl(normalPlatform, safeUser);
 
       updateJob(job.id, { status: 'capturing', progress: 2 });
-      const outFile = await captureClip(job.id, stream, secs, quality);
+      const outFile = await captureClip(job.id, stream, secs, normalQuality);
 
       updateJob(job.id, { status: 'ready', progress: 100, outputFile: outFile });
       console.log(`[Clipper] Job ${job.id} ready → ${outFile}`);
     } catch (err) {
       console.error(`[Clipper] Job ${job.id} failed:`, err.message);
       updateJob(job.id, { status: 'error', error: err.message });
+    } finally {
+      _activeJobs--;
     }
   })();
 
@@ -513,12 +665,15 @@ function startClip({ platform, username, duration, quality = 'medium' }) {
    ============================================================ */
 const router = express.Router();
 
+// Apply rate limiting and API-key guard to all routes on this router
+router.use(rateLimitMiddleware);
+
 /**
  * POST /api/clipper/clip
  * Body: { platform, username, duration?, quality? }
  * Returns: { jobId, status, message }
  */
-router.post('/clip', (req, res) => {
+router.post('/clip', apiKeyMiddleware, (req, res) => {
   try {
     const { platform, username, duration, quality } = req.body || {};
 
@@ -526,8 +681,7 @@ router.post('/clip', (req, res) => {
       return res.status(400).json({ error: 'platform and username are required' });
     }
 
-    const VALID_PLATFORMS = ['youtube', 'twitch', 'kick', 'odysee'];
-    if (!VALID_PLATFORMS.includes(platform.toLowerCase())) {
+    if (!VALID_PLATFORMS.includes((platform || '').toLowerCase())) {
       return res.status(400).json({
         error: `Unsupported platform. Valid: ${VALID_PLATFORMS.join(', ')}`,
       });
@@ -538,21 +692,23 @@ router.post('/clip', (req, res) => {
     res.json({
       jobId: job.id,
       status: job.status,
-      message: `Clip job started for ${platform}/${username} (${job.duration}s)`,
+      message: `Clip job started for ${job.platform}/${job.username} (${job.duration}s)`,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message });
   }
 });
 
 /**
  * GET /api/clipper/clip/:jobId
- * Returns the current job state.
+ * Returns the current job state (internal paths stripped).
  */
 router.get('/clip/:jobId', (req, res) => {
+  try { assertValidJobId(req.params.jobId); } catch (e) { return res.status(400).json({ error: e.message }); }
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
-  res.json(job);
+  res.json(publicJob(job));
 });
 
 /**
@@ -560,6 +716,7 @@ router.get('/clip/:jobId', (req, res) => {
  * Streams the finished mp4 to the client and deletes it afterwards.
  */
 router.get('/clip/:jobId/download', (req, res) => {
+  try { assertValidJobId(req.params.jobId); } catch (e) { return res.status(400).json({ error: e.message }); }
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
   if (job.status !== 'ready') return res.status(409).json({ error: `Job status: ${job.status}` });
@@ -567,14 +724,18 @@ router.get('/clip/:jobId/download', (req, res) => {
     return res.status(410).json({ error: 'Clip file no longer exists' });
   }
 
-  const filename = `clip_${job.platform}_${job.username}_${job.duration}s.mp4`;
-  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  // Sanitize every field that goes into the filename to prevent header injection
+  const safePlatform = (job.platform || 'unknown').replace(/[^\w]/g, '_');
+  const safeUser     = (job.username || 'unknown').replace(/[^\w@.-]/g, '_');
+  const safeDur      = Number(job.duration) || 0;
+  const filename     = safeFilename(`clip_${safePlatform}_${safeUser}_${safeDur}s.mp4`);
+
+  res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
   res.setHeader('Content-Type', 'video/mp4');
 
   const stream = fs.createReadStream(job.outputFile);
   stream.pipe(res);
   stream.on('close', () => {
-    // Remove clip file after download to save disk space
     fs.unlink(job.outputFile, () => {});
     updateJob(job.id, { outputFile: null, downloadUrl: null, status: 'downloaded' });
   });
@@ -582,13 +743,10 @@ router.get('/clip/:jobId/download', (req, res) => {
 
 /**
  * POST /api/clipper/clip/:jobId/catbox
- * Server-side proxy: reads the finished mp4 and uploads it to Catbox anonymously.
- * Returns: { url } on success.
- *
- * We do this server-side because Catbox does not send CORS headers, so a
- * direct browser fetch to catbox.moe/user/api.php is blocked.
+ * Server-side proxy: uploads finished mp4 to Catbox.
  */
-router.post('/clip/:jobId/catbox', async (req, res) => {
+router.post('/clip/:jobId/catbox', apiKeyMiddleware, async (req, res) => {
+  try { assertValidJobId(req.params.jobId); } catch (e) { return res.status(400).json({ error: e.message }); }
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
@@ -599,34 +757,27 @@ router.post('/clip/:jobId/catbox', async (req, res) => {
 
   try {
     const fileBuffer = fs.readFileSync(filePath);
-    const filename   = `clip_${job.platform}_${job.username}_${job.duration}s.mp4`;
-    const boundary   = 'ClipperBoundary' + Date.now().toString(16);
-    const CRLF       = '\r\n';
+    const safePlatform = (job.platform || 'unknown').replace(/[^\w]/g, '_');
+    const safeUser     = (job.username || 'unknown').replace(/[^\w@.-]/g, '_');
+    const filename     = `clip_${safePlatform}_${safeUser}_${Number(job.duration) || 0}s.mp4`;
+    const boundary     = 'ClipperBoundary' + Date.now().toString(16);
+    const CRLF         = '\r\n';
 
-    // Manually build a valid multipart/form-data body as a single Buffer.
-    // node-fetch receives a Buffer and sets the body correctly without
-    // needing FormData or Blob — works on Node 16, 18, 20+.
     const body = Buffer.concat([
-      // ── field: reqtype ──
       Buffer.from(`--${boundary}${CRLF}`),
       Buffer.from(`Content-Disposition: form-data; name="reqtype"${CRLF}`),
       Buffer.from(CRLF),
       Buffer.from(`fileupload${CRLF}`),
-      // ── field: userhash (empty = anonymous upload) ──
-      // Catbox requires this field to be present even for anonymous uploads;
-      // omitting it entirely returns 412 "Invalid uploader".
       Buffer.from(`--${boundary}${CRLF}`),
       Buffer.from(`Content-Disposition: form-data; name="userhash"${CRLF}`),
       Buffer.from(CRLF),
       Buffer.from(`${CATBOX_USERHASH}${CRLF}`),
-      // ── field: fileToUpload ──
       Buffer.from(`--${boundary}${CRLF}`),
       Buffer.from(`Content-Disposition: form-data; name="fileToUpload"; filename="${filename}"${CRLF}`),
       Buffer.from(`Content-Type: video/mp4${CRLF}`),
-      Buffer.from(CRLF),          // blank line separates headers from body
+      Buffer.from(CRLF),
       fileBuffer,
       Buffer.from(CRLF),
-      // ── closing boundary ──
       Buffer.from(`--${boundary}--${CRLF}`),
     ]);
 
@@ -661,14 +812,10 @@ router.post('/clip/:jobId/catbox', async (req, res) => {
 
 /**
  * POST /api/clipper/clip/:jobId/quax
- * Server-side proxy: uploads the finished mp4 to qu.ax (no auth required).
- * qu.ax accepts multipart/form-data with a "files[]" field.
- * Returns: { url } on success.
- *
- * Done server-side because qu.ax does not send CORS headers, so a direct
- * browser fetch is blocked.
+ * Server-side proxy: uploads finished mp4 to qu.ax.
  */
-router.post('/clip/:jobId/quax', async (req, res) => {
+router.post('/clip/:jobId/quax', apiKeyMiddleware, async (req, res) => {
+  try { assertValidJobId(req.params.jobId); } catch (e) { return res.status(400).json({ error: e.message }); }
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
@@ -679,9 +826,11 @@ router.post('/clip/:jobId/quax', async (req, res) => {
 
   try {
     const fileBuffer = fs.readFileSync(filePath);
-    const filename   = `clip_${job.platform}_${job.username}_${job.duration}s.mp4`;
-    const boundary   = 'QuaxBoundary' + Date.now().toString(16);
-    const CRLF       = '\r\n';
+    const safePlatform = (job.platform || 'unknown').replace(/[^\w]/g, '_');
+    const safeUser     = (job.username || 'unknown').replace(/[^\w@.-]/g, '_');
+    const filename     = `clip_${safePlatform}_${safeUser}_${Number(job.duration) || 0}s.mp4`;
+    const boundary     = 'QuaxBoundary' + Date.now().toString(16);
+    const CRLF         = '\r\n';
 
     const body = Buffer.concat([
       Buffer.from(`--${boundary}${CRLF}`),
@@ -712,13 +861,11 @@ router.post('/clip/:jobId/quax', async (req, res) => {
       return res.status(502).json({ error: `qu.ax HTTP ${quaxRes.status}: ${text}` });
     }
 
-    // qu.ax returns JSON: { files: [{ url, name, size }] }
     let url;
     try {
       const json = JSON.parse(text);
       url = json?.files?.[0]?.url || json?.url;
     } catch (_) {
-      // Fall back to plain-text URL (some qu.ax responses are bare URLs)
       url = text.startsWith('https://') ? text : null;
     }
 
@@ -737,7 +884,8 @@ router.post('/clip/:jobId/quax', async (req, res) => {
  * DELETE /api/clipper/clip/:jobId
  * Cancel / discard a job and its output file.
  */
-router.delete('/clip/:jobId', (req, res) => {
+router.delete('/clip/:jobId', apiKeyMiddleware, (req, res) => {
+  try { assertValidJobId(req.params.jobId); } catch (e) { return res.status(400).json({ error: e.message }); }
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
@@ -749,10 +897,10 @@ router.delete('/clip/:jobId', (req, res) => {
 
 /**
  * GET /api/clipper/jobs
- * List all jobs (most recent first, max 100).
+ * List all jobs (most recent first, max 100) — internal paths stripped.
  */
-router.get('/jobs', (_req, res) => {
-  const list = jobs.values();
+router.get('/jobs', (req, res) => {
+  const list = jobs.values().map(publicJob);
   res.json({ jobs: list, total: jobs.size });
 });
 
