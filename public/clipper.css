@@ -20,6 +20,9 @@
   --text-dim:   #3d4560;
   --radius:     6px;
   --radius-lg:  10px;
+  --purple:     #8b5cf6;
+  --purple-hi:  #a78bfa;
+  --purple-dim: #4c1d95;
 }
 
 html { height: 100%; }
@@ -633,14 +636,33 @@ select:focus { border-color: var(--amber); }
 
 .preview-meta .meta-pill.green { border-color: var(--green); color: var(--green); }
 
-/* ── Footer ── */
+
 footer {
-  margin-top: 32px;
-  font-size: 12px;
-  color: var(--text-dim);
-  font-family: 'JetBrains Mono', monospace;
+  margin-top: 24px; /* Reduced margin to bring it closer to the card */
   text-align: center;
+  font-family: 'ABeeZee', sans-serif; 
+  text-transform: uppercase;
+  font-style: italic;
+  font-size: 10px;      /* Smaller text */
+  line-height: 1.2;     /* Closer together vertically */
+  letter-spacing: 0;    /* Closer together horizontally */
+  color: var(--purple);
 }
+
+footer a {
+  color: var(--purple); /* Matching purple */
+  text-decoration: none;
+  padding: 0 4px;      /* Closer together horizontally */
+  transition: none;
+  display: inline-block;
+}
+
+footer a:hover {
+  color: var(--purple-hi);
+  text-decoration: none;
+}
+
+
 /* ── Catbox upload section ── */
 .catbox-upload-section {
   margin-top: 20px;
@@ -808,11 +830,31 @@ footer {
     gap: 16px;
   }
 
-  /* Adjust capture button for touch targets */
-  .btn-capture {
-    font-size: 16px;
-    padding: 12px;
-  }
+ .btn-capture {
+  width: 100%;
+  padding: 14px;
+  background: var(--purple);
+  color: #ffffff; /* Changed to white for better contrast */
+  border: none;
+  border-radius: var(--radius);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-capture:hover:not(:disabled) { 
+  background: var(--purple-hi); 
+}
+
+.btn-capture:disabled {
+  background: var(--purple-dim);
+  color: #a78bfa;
+  cursor: not-allowed;
+}
 
   /* Stack the three-button result row on smaller screens */
   .result-actions-row {
