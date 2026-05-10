@@ -1,26 +1,3 @@
-/**
- * clipper.js — Multi-platform live stream clipper
- *
- * Supported platforms: YouTube · Twitch · Kick · Odysee
- *
- * Mount as an Express router:
- * const clipper = require('./clipper');
- * app.use('/api/clipper', clipper.router);
- *
- * Or run standalone:
- * node clipper.js
- *
- * Environment variables (all optional — sensible defaults):
- * CLIP_OUTPUT_DIR   — where finished .mp4 clips are stored   (default: ./public/clips)
- * CLIP_TEMP_DIR     — scratch space during capture             (default: ./temp)
- * KICK_API_BASE     — Kick public API root                     (default: https://api.kick.com)
- * ODYSEE_LIVE_API   — Odysee live API root                     (default: https://api.odysee.live)
- * ODYSEE_SDK_PROXY  — Odysee SDK proxy root                    (default: https://api.na-backend.odysee.com)
- * ODYSEE_COOKIE     — auth cookie for Odysee (optional)
- * MAX_CLIP_SECONDS  — hard cap on requested duration           (default: 300)
- * DEFAULT_CLIP_SECS — fallback duration when none provided     (default: 60)
- * DB_PATH           — path to the SQLite database file         (default: ./clipper.db)
- */
 
 'use strict';
 
