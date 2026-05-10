@@ -36,11 +36,23 @@
 <link rel="manifest" href="/site.webmanifest">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="clipper.css">
 </head>
 <body>
-<div class="page-wrap">
+<!--
+  AD CONTAINMENT: The ad is wrapped in a div with position:relative and
+  overflow:hidden. This prevents the ad network from injecting a
+  position:fixed full-screen overlay (a common mobile ad tactic that
+  captures all touch events and makes the page appear frozen).
+-->
+<div style="position:relative; z-index:0; overflow:hidden; width:100%; min-height:1px; text-align:center;">
+  <script async type="application/javascript" src="https://a.magsrv.com/ad-provider.js"></script>
+  <ins class="eas6a97888e2" data-zoneid="5923164"></ins>
+  <script>(AdProvider = window.AdProvider || []).push({"serve": {}});</script>
+</div>
+<div class="page-wrap"><br><br>
 
   <header>
     <div class="logo-mark">

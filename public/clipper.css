@@ -1,4 +1,15 @@
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  /* Remove the blue flash on tap for all elements on mobile */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Eliminate 300ms tap delay on all interactive elements */
+button, a, select, input, label, .platform-chip {
+  touch-action: manipulation;
+}
 
 :root {
   --bg-base:    #0c0e14;
@@ -31,7 +42,7 @@ body {
   min-height: 100%;
   background: var(--bg-base);
   color: var(--text);
-  font-family: 'Barlow', sans-serif;
+  font-family: 'Inter', sans-serif;
   font-size: 15px;
   line-height: 1.6;
   display: flex;
@@ -85,7 +96,7 @@ header {
 .logo-mark svg { width: 24px; height: 24px; }
 
 header h1 {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Inter', sans-serif;
   font-size: 32px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -96,7 +107,7 @@ header h1 {
 header p {
   font-size: 13px;
   color: var(--text-muted);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   margin-bottom: 2px;
 }
 
@@ -110,7 +121,7 @@ header p {
 }
 
 .card-title {
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Inter', sans-serif;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.12em;
@@ -196,7 +207,7 @@ header p {
 label {
   display: block;
   font-size: 12px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   color: var(--text-muted);
   margin-bottom: 6px;
   letter-spacing: 0.04em;
@@ -211,7 +222,7 @@ input[type="url"] {
   padding: 10px 14px;
   color: var(--text);
   font-size: 14px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   outline: none;
   transition: border-color 0.15s;
 }
@@ -258,7 +269,7 @@ input[type="range"]::-webkit-slider-thumb {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--amber);
+  background: #ffffff;
   cursor: pointer;
 }
 
@@ -266,15 +277,15 @@ input[type="range"]::-moz-range-thumb {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--amber);
+  background: #ffffff;
   cursor: pointer;
   border: none;
 }
 
 .slider-val {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 13px;
-  color: var(--amber);
+  color: #ffffff;
   min-width: 36px;
   text-align: right;
 }
@@ -302,11 +313,11 @@ select:focus { border-color: var(--amber); }
 .btn-capture {
   width: 100%;
   padding: 14px;
-  background: var(--amber);
-  color: #0c0e14;
+  background: var(--purple);
+  color: #ffffff;
   border: none;
   border-radius: var(--radius);
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Inter', sans-serif;
   font-size: 18px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -315,12 +326,12 @@ select:focus { border-color: var(--amber); }
   transition: all 0.15s;
 }
 
-.btn-capture:hover:not(:disabled) { background: #ffb733; }
+.btn-capture:hover:not(:disabled) { background: var(--purple-hi); }
 .btn-capture:active:not(:disabled) { transform: scale(0.99); }
 
 .btn-capture:disabled {
-  background: var(--amber-dim);
-  color: #4a3810;
+  background: var(--purple-dim);
+  color: #a78bfa;
   cursor: not-allowed;
 }
 
@@ -334,7 +345,7 @@ select:focus { border-color: var(--amber); }
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s;
-  font-family: 'Barlow', sans-serif;
+  font-family: 'Inter', sans-serif;
 }
 
 .btn-secondary:hover { border-color: var(--text-muted); background: var(--bg-raised); }
@@ -344,7 +355,7 @@ select:focus { border-color: var(--amber); }
 .progress-card.visible { display: block; }
 
 .job-id-line {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 11px;
   color: var(--text-dim);
   margin-bottom: 14px;
@@ -358,7 +369,7 @@ select:focus { border-color: var(--amber); }
 }
 
 .status-badge {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -401,7 +412,7 @@ select:focus { border-color: var(--amber); }
 .progress-bar-fill.err  { background: var(--red); }
 
 .progress-pct {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 12px;
   color: var(--text-dim);
   text-align: right;
@@ -425,7 +436,7 @@ select:focus { border-color: var(--amber); }
   border-radius: var(--radius);
   padding: 10px 14px;
   color: var(--text-muted);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 12px;
   outline: none;
   overflow: hidden;
@@ -444,7 +455,7 @@ select:focus { border-color: var(--amber); }
   color: var(--green);
   font-size: 14px;
   font-weight: 600;
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Inter', sans-serif;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   cursor: pointer;
@@ -478,7 +489,7 @@ select:focus { border-color: var(--amber); }
   padding: 12px 16px;
   font-size: 13px;
   color: var(--red);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   display: none;
   margin-top: 14px;
   word-break: break-word;
@@ -514,7 +525,7 @@ select:focus { border-color: var(--amber); }
 
 /* ── Platform hint ── */
 .platform-hint {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 11px;
   color: var(--text-dim);
   margin-top: 6px;
@@ -539,7 +550,7 @@ select:focus { border-color: var(--amber); }
   padding: 7px 12px;
   background: var(--bg-raised);
   border-bottom: 1px solid var(--border);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 11px;
   color: var(--text-muted);
 }
@@ -587,7 +598,7 @@ select:focus { border-color: var(--amber); }
   padding: 26px 16px;
   font-size: 13px;
   color: var(--text-dim);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   text-align: center;
 }
 
@@ -618,7 +629,7 @@ select:focus { border-color: var(--amber); }
   padding: 8px 14px;
   background: var(--bg-raised);
   border-top: 1px solid var(--border);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 11px;
   color: var(--text-dim);
 }
@@ -640,7 +651,7 @@ select:focus { border-color: var(--amber); }
 footer {
   margin-top: 24px; /* Reduced margin to bring it closer to the card */
   text-align: center;
-  font-family: 'ABeeZee', sans-serif; 
+  font-family: 'Inter', sans-serif; 
   text-transform: uppercase;
   font-style: italic;
   font-size: 10px;      /* Smaller text */
@@ -673,7 +684,7 @@ footer a:hover {
   align-items: center;
   gap: 10px;
   margin-bottom: 14px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 11px;
   color: var(--text-dim);
   letter-spacing: 0.06em;
@@ -703,7 +714,7 @@ footer a:hover {
   border: 1px solid var(--blue);
   border-radius: var(--radius);
   color: var(--blue);
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Inter', sans-serif;
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -723,7 +734,7 @@ footer a:hover {
 }
 
 .catbox-status {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 12px;
   display: flex;
   align-items: center;
@@ -751,7 +762,7 @@ footer a:hover {
   color: var(--blue);
   font-size: 13px;
   font-weight: 600;
-  font-family: 'Barlow Condensed', sans-serif;
+  font-family: 'Inter', sans-serif;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   cursor: pointer;
@@ -784,7 +795,7 @@ footer a:hover {
   align-items: center;
   justify-content: center;
   margin-top: 8px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 12px;
 }
 
@@ -799,7 +810,7 @@ footer a:hover {
 .catbox-result.visible { display: flex; }
 
 .catbox-url-text {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 11px;
   color: var(--text-dim);
   word-break: break-all;
@@ -819,9 +830,23 @@ footer a:hover {
   }
 
   /* Make platform chips slightly more compact so they fit better in a row */
+  /* min-height: 44px keeps them within Apple's recommended touch-target size */
   .platform-chip {
     padding: 6px 12px;
     font-size: 12px;
+    min-height: 44px;
+  }
+
+  /*
+   * CRITICAL iOS FIX: inputs and selects with font-size < 16px cause
+   * Mobile Safari to auto-zoom on focus, which shifts the layout and
+   * makes elements appear in the wrong tap position until the user
+   * manually zooms back out. 16px is the threshold that prevents this.
+   */
+  input[type="text"],
+  input[type="url"],
+  select {
+    font-size: 16px;
   }
 
   /* Stack the Duration and Quality inputs instead of the 1fr 1fr grid */
@@ -830,31 +855,14 @@ footer a:hover {
     gap: 16px;
   }
 
- .btn-capture {
-  width: 100%;
-  padding: 14px;
-  background: var(--purple);
-  color: #ffffff; /* Changed to white for better contrast */
-  border: none;
-  border-radius: var(--radius);
-  font-family: 'Barlow Condensed', sans-serif;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.btn-capture:hover:not(:disabled) { 
-  background: var(--purple-hi); 
-}
-
-.btn-capture:disabled {
-  background: var(--purple-dim);
-  color: #a78bfa;
-  cursor: not-allowed;
-}
+  /* Ensure 44px min-height touch target on all action buttons */
+  .btn-capture,
+  .btn-secondary,
+  .btn-catbox,
+  .btn-download,
+  .btn-open {
+    min-height: 44px;
+  }
 
   /* Stack the three-button result row on smaller screens */
   .result-actions-row {
