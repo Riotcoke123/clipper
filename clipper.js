@@ -1,4 +1,3 @@
-
 'use strict';
 
 require('dotenv').config();
@@ -18,10 +17,14 @@ const Database = require('better-sqlite3');
 const CLIP_OUTPUT_DIR  = process.env.CLIP_OUTPUT_DIR  || path.join(__dirname, 'public', 'clips');
 const CLIP_TEMP_DIR    = process.env.CLIP_TEMP_DIR    || path.join(__dirname, 'temp');
 const KICK_API_BASE    = process.env.KICK_API_BASE    || 'https://api.kick.com';
+const KICK_AUTH_BASE   = process.env.KICK_AUTH_BASE   || 'https://id.kick.com';
+const KICK_CLIENT_ID   = process.env.KICK_CLIENT_ID   || '';
+const KICK_CLIENT_SECRET = process.env.KICK_CLIENT_SECRET || '';
+const YOUTUBE_API_KEY  = process.env.YOUTUBE_API_KEY  || '';
 const ODYSEE_LIVE_API  = process.env.ODYSEE_LIVE_API  || 'https://api.odysee.live';
 const ODYSEE_SDK_PROXY = process.env.ODYSEE_SDK_PROXY || 'https://api.na-backend.odysee.com';
 const ODYSEE_COOKIE    = process.env.ODYSEE_COOKIE    || '';
-const CATBOX_USERHASH        = process.env.CATBOX_USERHASH        || '';
+const CATBOX_USERHASH  = process.env.CATBOX_USERHASH  || '';
 const MAX_CLIP_SECONDS  = Number(process.env.MAX_CLIP_SECONDS)  || 300;
 const DEFAULT_CLIP_SECS = Number(process.env.DEFAULT_CLIP_SECS) || 60;
 const DB_PATH           = process.env.DB_PATH || path.join(__dirname, 'clipper.db');
@@ -274,20 +277,57 @@ let _activeJobs = 0;
    ============================================================ */
 
 /**
- * YouTube — ask yt-dlp for the direct HLS manifest of a live stream.
- * Input:  channel URL or video URL (watch?v=…, /live/…, @handle)
+ * YouTube — resolve a live stream to a direct watch?v= URL using the Data API,
+ * so yt-dlp uses the fast [youtube] extractor instead of the fragile [youtube:tab]
+ * channel-page scraper (which 404s when the channel has no active live tab).
+ *
+ * Falls back to the @handle/live channel URL if YOUTUBE_API_KEY is absent or the
+ * lookup fails (e.g. quota exhausted).
  */
 async function resolveYouTube(username) {
-  let url;
+  // Full URL supplied — pass straight through; a direct watch?v= URL already uses
+  // the [youtube] extractor so there's no tab scrape.
   if (username.startsWith('http')) {
-    assertSafeUrl(username); // SSRF guard
-    url = username;
-  } else {
-    // Bare handle — build a safe URL (no user-controlled host)
-    const handle = encodeURIComponent(username.replace(/^@/, ''));
-    url = `https://www.youtube.com/@${handle}/live`;
+    assertSafeUrl(username);
+    return { type: 'ytdlp', url: username };
   }
-  return { type: 'ytdlp', url };
+
+  const handle = username.replace(/^@/, '');
+
+  // ── Try YouTube Data API v3 to get a direct video ID ────────────────────
+  if (YOUTUBE_API_KEY) {
+    try {
+      // Step 1: resolve @handle → channel ID
+      const chRes = await fetch(
+        `https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${encodeURIComponent(handle)}&key=${YOUTUBE_API_KEY}`
+      );
+      if (chRes.ok) {
+        const chJson = await chRes.json();
+        const channelId = chJson?.items?.[0]?.id;
+        if (channelId) {
+          // Step 2: find an active live broadcast
+          const srRes = await fetch(
+            `https://www.googleapis.com/youtube/v3/search?part=id&channelId=${encodeURIComponent(channelId)}&eventType=live&type=video&key=${YOUTUBE_API_KEY}`
+          );
+          if (srRes.ok) {
+            const srJson = await srRes.json();
+            const videoId = srJson?.items?.[0]?.id?.videoId;
+            if (videoId) {
+              console.log(`[YouTube] Resolved @${handle} -> watch?v=${videoId} via Data API`);
+              return { type: 'ytdlp', url: `https://www.youtube.com/watch?v=${videoId}` };
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[YouTube] Data API lookup failed (${err.message}), falling back to channel URL`);
+    }
+  }
+
+  // ── Fallback: channel live-tab URL ───────────────────────────────────────
+  // Uses [youtube:tab] — can 404 if the channel has no active live tab.
+  console.warn(`[YouTube] Falling back to @${handle}/live tab URL (may 404 if not live)`);
+  return { type: 'ytdlp', url: `https://www.youtube.com/@${encodeURIComponent(handle)}/live` };
 }
 
 /**
@@ -300,12 +340,68 @@ async function resolveTwitch(username) {
 }
 
 /**
- * Kick — yt-dlp handles format + auth in one shot.
- * We never pass a raw caller URL to avoid SSRF.
+ * Kick — obtain an OAuth2 client-credentials token, hit the Kick public API to
+ * get the channel's live playback URL, and return it as type:'hls' so the
+ * captureClip engine feeds it directly to ffmpeg (bypassing yt-dlp and libcurl,
+ * which fail to reach Kick's AWS IVS CDN on some server networks).
+ *
+ * Falls back to yt-dlp if credentials are missing or the API call fails.
  */
 async function resolveKick(username) {
-  const handle = encodeURIComponent(username.replace(/^https?:\/\/[^/]+\//i, '').split('/')[0]);
-  return { type: 'ytdlp', url: `https://kick.com/${handle}` };
+  // Strip any URL prefix — we only want the channel slug
+  const handle = username.replace(/^https?:\/\/[^/]+\//i, '').split('/')[0];
+  const safeHandle = encodeURIComponent(handle);
+
+  if (KICK_CLIENT_ID && KICK_CLIENT_SECRET) {
+    try {
+      // ── 1. Get OAuth2 access token (client credentials flow) ─────────────
+      const tokenRes = await fetch(`${KICK_AUTH_BASE}/oauth/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type:    'client_credentials',
+          client_id:     KICK_CLIENT_ID,
+          client_secret: KICK_CLIENT_SECRET,
+        }).toString(),
+      });
+      if (!tokenRes.ok) {
+        throw new Error(`Kick OAuth ${tokenRes.status}: ${await tokenRes.text()}`);
+      }
+      const { access_token } = await tokenRes.json();
+
+      // ── 2. Fetch channel info ─────────────────────────────────────────────
+      // Kick public API v1: GET /v1/channels/{slug}
+      const chRes = await fetch(`${KICK_API_BASE}/v1/channels/${safeHandle}`, {
+        headers: {
+          'Authorization': `Bearer ${access_token}`,
+          'Accept':        'application/json',
+        },
+      });
+      if (!chRes.ok) {
+        throw new Error(`Kick API ${chRes.status}: ${await chRes.text()}`);
+      }
+      const chJson = await chRes.json();
+
+      // The playback URL lives on the livestream sub-object
+      const playbackUrl =
+        chJson?.data?.livestream?.playback_url ||
+        chJson?.livestream?.playback_url;
+
+      if (playbackUrl) {
+        console.log(`[Kick] Got HLS URL via API for ${handle}`);
+        return { type: 'hls', url: playbackUrl };
+      }
+
+      // Channel exists but has no active livestream
+      throw new Error(`${handle} is not currently live on Kick`);
+
+    } catch (err) {
+      console.error(`[Kick] API failed (${err.message}), falling back to yt-dlp`);
+    }
+  }
+
+  // ── Fallback: yt-dlp (requires reachable CDN) ────────────────────────────
+  return { type: 'ytdlp', url: `https://kick.com/${safeHandle}` };
 }
 
 /**
@@ -446,8 +542,13 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
   const outFile = path.join(CLIP_OUTPUT_DIR, `clip_${jobId}.mp4`);
   const tempRaw = path.join(CLIP_TEMP_DIR, `raw_${jobId}`);
 
-  if (stream.type === 'flv') {
-    // --- FLV path: ffmpeg straight from CDN ---
+  if (stream.type === 'flv' || stream.type === 'hls') {
+    // --- Direct-URL path: feed the stream URL straight into ffmpeg ---
+    // Used for:
+    //   'flv'  — raw FLV CDN streams
+    //   'hls'  — m3u8 URLs we resolved ourselves (e.g. via Kick/Odysee APIs)
+    //            ffmpeg's own HTTP stack is used here, completely bypassing
+    //            yt-dlp and libcurl (which fails to reach some CDNs).
     return new Promise((resolve, reject) => {
       updateJob(jobId, { status: 'capturing', progress: 5 });
 
@@ -495,17 +596,16 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
   await new Promise((resolve, reject) => {
     updateJob(jobId, { status: 'capturing', progress: 2 });
 
-    const needsImpersonation = /kick\.com/i.test(stream.url);
-
     const args = [
       '--no-playlist',
       '--socket-timeout', '20',
       '--retries', '3',
       '--fragment-retries', '3',
       '--format', formatArg,
-      '--downloader', 'ffmpeg',
-      '--downloader-args', `ffmpeg:-t ${duration}`,
-      ...(needsImpersonation ? ['--impersonate', 'chrome'] : []),
+      // Use Python's urllib instead of libcurl (avoids curl CDN connectivity issues
+      // on certain server networks). Time-limit via --download-sections.
+      '--downloader', 'native',
+      '--download-sections', `*0-${duration}`,
       '-o', tempFile,
       stream.url,
     ];
@@ -921,7 +1021,11 @@ if (require.main === module) {
       ? res.sendFile(page)
       : res.status(404).send('Place clipper.html + clipper.css in the public/ folder.');
   });
-
+router.get('/config', (req, res) => {
+  res.json({
+    apiKey: process.env.CLIPPER_API_KEY
+  });
+});
   app.listen(PORT, () => {
     console.log(`[Clipper] Standalone server on http://localhost:${PORT}`);
     console.log(`[Clipper] POST http://localhost:${PORT}/api/clipper/clip`);
