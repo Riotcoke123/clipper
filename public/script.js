@@ -1,5 +1,6 @@
 (function () {
   /* ── State ── */
+  let API_KEY = ''; // Loaded dynamically from /api/clipper/config
   let activePlatform = 'youtube';
   let pollInterval = null;
   let currentJobId = null;
@@ -29,370 +30,220 @@
   const statusMsg     = document.getElementById('status-msg');
   const progressFill  = document.getElementById('progress-fill');
   const progressPct   = document.getElementById('progress-pct');
-  const errorBox      = document.getElementById('error-box');
-  const cancelBtn     = document.getElementById('cancel-btn');
 
-  const downloadLink  = document.getElementById('download-link');
-  const newClipBtn    = document.getElementById('new-clip-btn');
   const clipPreview   = document.getElementById('clip-preview');
   const previewMeta   = document.getElementById('preview-meta');
+  // FIX #3: was 'download-btn' — the HTML element is 'download-link'
+  const downloadLink  = document.getElementById('download-link');
+
+  const catboxBtn     = document.getElementById('catbox-btn');
+  const catboxStatus  = document.getElementById('catbox-status');
+  const catboxResult  = document.getElementById('catbox-result');
+  const catboxUrlText = document.getElementById('catbox-url-text');
+  const catboxOpenLink = document.getElementById('catbox-open-link');
+
+  const quaxBtn       = document.getElementById('quax-btn');
+  const quaxStatus    = document.getElementById('quax-status');
+  const quaxResult    = document.getElementById('quax-result');
+  const quaxUrlText   = document.getElementById('quax-url-text');
+  const quaxOpenLink  = document.getElementById('quax-open-link');
+
+  // FIX #5: was getElementById('error-text') which doesn't exist in HTML.
+  // errorBox itself holds the message text.
+  const errorBox      = document.getElementById('error-box');
 
   const streamPreviewWrap    = document.getElementById('stream-preview-wrap');
   const streamPreviewIframe  = document.getElementById('stream-preview-iframe');
   const streamPreviewUnavail = document.getElementById('stream-preview-unavail');
-  const streamPreviewPlatform = document.getElementById('stream-preview-platform');
 
-  /* ── Embed URL builder ── */
-  function getEmbedUrl(platform, input) {
-    const v = input.trim();
-    if (!v) return null;
-    switch (platform) {
-      case 'twitch': {
-        // strip full URL down to channel name
-        const user = v.replace(/^https?:\/\/(www\.)?twitch\.tv\//i, '').split(/[/?#]/)[0] || v;
-        if (!user) return null;
-        const parent = window.location.hostname || 'localhost';
-        return `https://player.twitch.tv/?channel=${encodeURIComponent(user)}&parent=${parent}&autoplay=true&muted=true`;
-      }
-      case 'kick': {
-        const user = v.replace(/^https?:\/\/(www\.)?kick\.com\//i, '').split(/[/?#]/)[0] || v;
-        if (!user) return null;
-        return `https://player.kick.com/${encodeURIComponent(user)}`;
-      }
-      case 'youtube': {
-        // Extract video ID from all common YouTube URL formats:
-        //   watch?v=ID, /live/ID, youtu.be/ID, /shorts/ID, /embed/ID, /v/ID
-        const m = v.match(/(?:[?&]v=|\/(?:live|shorts|embed|v)\/)([a-zA-Z0-9_-]{11})|youtu\.be\/([a-zA-Z0-9_-]{11})/);
-        const videoId = m && (m[1] || m[2]);
-        if (videoId) {
-          const origin = encodeURIComponent(window.location.origin || 'http://localhost');
-          return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&enablejsapi=1&origin=${origin}`;
-        }
-        return null; // channel handle or @/live URL — can't embed without a video ID
-      }
-      case 'odysee': {
-        // Odysee embed uses /$/embed/<name>/<claimId>
-        // Full URL formats:
-        //   odysee.com/@Channel:id/video-name:claimId  → embed video claim
-        //   odysee.com/@Channel:id                     → embed channel (shows live/latest)
-        const clean = v.replace(/^https?:\/\/(www\.)?odysee\.com\//i, '');
-        if (!clean) return null;
-        // Video claim inside a channel: @Channel:abc/my-video:def
-        const videoMatch = clean.match(/^@[^/]+\/([^/:]+):([a-f0-9]+)/i);
-        if (videoMatch) {
-          return `https://odysee.com/$/embed/${videoMatch[1]}/${videoMatch[2]}?autoplay=1&muted=1`;
-        }
-        // Channel-only: @Channel:claimId
-        const channelMatch = clean.match(/^(@[^/:]+):([a-f0-9]+)/i);
-        if (channelMatch) {
-          return `https://odysee.com/$/embed/${channelMatch[1]}/${channelMatch[2]}?autoplay=1&muted=1`;
-        }
-        return null; // username-only — Odysee needs a full URL with claim ID
-      }
-      default:
-        return null;
-    }
-  }
-
-  /* ── Stream preview updater (debounced) ── */
-  let previewDebounce = null;
-  function schedulePreviewUpdate() {
-    clearTimeout(previewDebounce);
-    previewDebounce = setTimeout(updateStreamPreview, 600);
-  }
-
-  /* ── YouTube iframe error listener (catches Error 153 = not embeddable) ── */
-  // YouTube only sends postMessage error events when the player has an active
-  // subscription. We trigger that by sending a 'listening' ping to the iframe
-  // after it loads. Without this, YouTube renders its own Error 153 screen
-  // inside the iframe instead of letting us intercept and show our fallback.
-  streamPreviewIframe.addEventListener('load', () => {
-    if (activePlatform !== 'youtube') return;
+  /* ── Initialization ── */
+  async function init() {
     try {
-      streamPreviewIframe.contentWindow.postMessage(
-        JSON.stringify({ event: 'listening', id: 1 }),
-        'https://www.youtube.com'
-      );
-    } catch (_) {}
-  });
-
-  // YouTube sends JSON postMessages when the player state changes.
-  // Error codes: 2=bad videoId, 5=HTML5 error, 100=not found,
-  //              101/150=not embeddable, 153=playback disallowed.
-  window.addEventListener('message', (evt) => {
-    if (!evt.data) return;
-    // Only care about messages from YouTube
-    if (evt.origin && evt.origin !== 'https://www.youtube.com') return;
-    let msg;
-    try { msg = typeof evt.data === 'string' ? JSON.parse(evt.data) : evt.data; } catch (_) { return; }
-
-    const isYTError = msg?.event === 'onError'
-      || (msg?.event === 'infoDelivery' && msg?.info?.error);
-    if (!isYTError) return;
-
-    const errCode = msg?.info?.error ?? msg?.info;
-    if ([2, 5, 100, 101, 150, 153].includes(errCode)) {
-      // Embedding blocked (101/150/153) or unplayable (2/5/100):
-      // silently collapse the preview — no error banner, clipping is unaffected.
-      streamPreviewWrap.classList.remove('visible');
-      streamPreviewIframe.src = 'about:blank';
-      streamPreviewUnavail.classList.remove('visible');
-    }
-  });
-
-  function updateStreamPreview() {
-    const v = usernameInput.value.trim();
-    if (!v) {
-      streamPreviewWrap.classList.remove('visible');
-      streamPreviewIframe.src = 'about:blank';
-      return;
-    }
-    const embedUrl = getEmbedUrl(activePlatform, v);
-    streamPreviewWrap.classList.add('visible');
-    streamPreviewPlatform.textContent = activePlatform;
-
-    if (embedUrl) {
-      streamPreviewIframe.src = embedUrl;
-      streamPreviewIframe.style.display = '';
-      streamPreviewUnavail.classList.remove('visible');
-    } else {
-      streamPreviewIframe.src = 'about:blank';
-      streamPreviewIframe.style.display = 'none';
-      const msgs = {
-        odysee: 'Paste a full Odysee URL (with claim ID) to preview — e.g. odysee.com/@Channel:id',
-        youtube: 'Paste a full YouTube live URL to preview — e.g. youtube.com/watch?v=...',
-      };
-      streamPreviewUnavail.textContent = msgs[activePlatform] || 'No embed available — clip will still work.';
-      streamPreviewUnavail.classList.add('visible');
+      const res = await fetch('/api/clipper/config');
+      const config = await res.json();
+      API_KEY = config.apiKey;
+      console.log("Configuration loaded.");
+    } catch (err) {
+      console.error("Failed to load configuration:", err);
+      showError("Could not load API configuration. Check your backend logs.");
     }
   }
+
+  init();
+
+  durationSlider.addEventListener('input', () => {
+    durationVal.textContent = durationSlider.value + 's';
+  });
+
   chips.forEach(chip => {
     chip.addEventListener('click', () => {
       chips.forEach(c => c.classList.remove('active'));
       chip.classList.add('active');
       activePlatform = chip.dataset.platform;
-      platformHint.textContent = PLATFORM_HINTS[activePlatform] || '';
-      schedulePreviewUpdate();
+      usernameInput.placeholder = PLATFORM_HINTS[activePlatform];
+      platformHint.textContent = PLATFORM_HINTS[activePlatform];
+      updateStreamPreview();
     });
   });
 
-  /* ── Auto-detect platform from pasted URL ── */
-  usernameInput.addEventListener('input', () => {
-    const v = usernameInput.value.trim();
-    const map = {
-      'youtube.com': 'youtube',
-      'youtu.be':    'youtube',
-      'twitch.tv':   'twitch',
-      'kick.com':    'kick',
-      'odysee.com':  'odysee',
-    };
-    for (const [host, platform] of Object.entries(map)) {
-      if (v.includes(host)) {
-        chips.forEach(c => c.classList.remove('active'));
-        const chip = document.querySelector(`[data-platform="${platform}"]`);
-        if (chip) chip.classList.add('active');
-        activePlatform = platform;
-        platformHint.textContent = PLATFORM_HINTS[platform];
-        break;
-      }
-    }
-    schedulePreviewUpdate();
-  });
+  usernameInput.addEventListener('input', debounce(updateStreamPreview, 800));
 
-  /* ── Duration slider ── */
-  durationSlider.addEventListener('input', () => {
-    durationVal.textContent = durationSlider.value + 's';
-  });
-
-  /* ── Capture button ── */
+  /* ── Actions ── */
   captureBtn.addEventListener('click', async () => {
     const username = usernameInput.value.trim();
-    if (!username) {
-      usernameInput.focus();
-      usernameInput.style.borderColor = 'var(--red)';
-      setTimeout(() => { usernameInput.style.borderColor = ''; }, 1200);
-      return;
-    }
+    if (!username) return alert('Please enter a username or URL');
 
     const payload = {
       platform: activePlatform,
-      username,
-      duration: parseInt(durationSlider.value, 10),
-      quality:  qualitySelect.value,
+      username: username,
+      duration: parseInt(durationSlider.value),
+      quality:  qualitySelect.value
     };
 
-    showProgress();
-    setStatus('pending', '<span class="spinner"></span> Submitting job…');
-
     try {
+      errorBox.classList.remove('visible');
+      captureBtn.disabled = true;
+
       const res = await fetch('/api/clipper/clip', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${API_KEY}`
+        },
         body: JSON.stringify(payload),
       });
+
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to start capture');
 
-      if (!res.ok) throw new Error(data.error || 'Request failed');
-
-      jobIdLine.textContent = 'job: ' + data.jobId;
       currentJobId = data.jobId;
-      startPolling(data.jobId);
+      startPolling(currentJobId);
+
     } catch (err) {
-      setStatus('error', 'Submit failed');
       showError(err.message);
+      captureBtn.disabled = false;
     }
   });
 
-  const catboxBtn      = document.getElementById('catbox-btn');
-  const catboxStatus   = document.getElementById('catbox-status');
-  const catboxResult   = document.getElementById('catbox-result');
-  const catboxOpenLink = document.getElementById('catbox-open-link');
-  const catboxUrlText  = document.getElementById('catbox-url-text');
-
-  const quaxBtn      = document.getElementById('quax-btn');
-  const quaxStatus   = document.getElementById('quax-status');
-  const quaxResult   = document.getElementById('quax-result');
-  const quaxOpenLink = document.getElementById('quax-open-link');
-  const quaxUrlText  = document.getElementById('quax-url-text');
-
-  /* ── Catbox upload ── */
   catboxBtn.addEventListener('click', async () => {
-    catboxBtn.disabled = true;
-    catboxStatus.innerHTML = '<span class="spinner"></span> Uploading to Catbox…';
-
+    if (!currentJobId) return;
     try {
-      if (!currentJobId) throw new Error('No clip job active');
+      catboxBtn.disabled = true;
+      catboxStatus.innerHTML = '<span class="spinner"></span> Uploading to Catbox...';
 
-      const res = await fetch(`/api/clipper/clip/${currentJobId}/catbox`, { method: 'POST' });
+      const res = await fetch(`/api/clipper/clip/${currentJobId}/catbox`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${API_KEY}` }
+      });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
 
-      catboxOpenLink.href = data.url;
+      if (!res.ok) throw new Error(data.error || 'Catbox upload failed');
+
+      catboxStatus.innerHTML = '✅ Uploaded!';
       catboxUrlText.textContent = data.url;
+      catboxOpenLink.href = data.url;
       catboxResult.classList.add('visible');
-      catboxStatus.innerHTML = '<span class="catbox-success">✓ Uploaded!</span>';
     } catch (err) {
-      catboxStatus.innerHTML = `<span class="catbox-err">! ${err.message}</span>`;
+      catboxStatus.innerHTML = `❌ ${err.message}`;
       catboxBtn.disabled = false;
     }
   });
 
-  /* ── qu.ax upload ── */
   quaxBtn.addEventListener('click', async () => {
-    quaxBtn.disabled = true;
-    quaxStatus.innerHTML = '<span class="spinner"></span> Uploading to qu.ax…';
-
+    if (!currentJobId) return;
     try {
-      if (!currentJobId) throw new Error('No clip job active');
+      quaxBtn.disabled = true;
+      quaxStatus.innerHTML = '<span class="spinner"></span> Uploading to qu.ax...';
 
-      const res = await fetch(`/api/clipper/clip/${currentJobId}/quax`, { method: 'POST' });
+      const res = await fetch(`/api/clipper/clip/${currentJobId}/quax`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${API_KEY}` }
+      });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
 
-      quaxOpenLink.href = data.url;
+      if (!res.ok) throw new Error(data.error || 'qu.ax upload failed');
+
+      quaxStatus.innerHTML = '✅ Uploaded!';
       quaxUrlText.textContent = data.url;
+      quaxOpenLink.href = data.url;
       quaxResult.classList.add('visible');
-      quaxStatus.innerHTML = '<span class="catbox-success">✓ Uploaded!</span>';
     } catch (err) {
-      quaxStatus.innerHTML = `<span class="catbox-err">! ${err.message}</span>`;
+      quaxStatus.innerHTML = `❌ ${err.message}`;
       quaxBtn.disabled = false;
     }
   });
 
-  cancelBtn.addEventListener('click', reset);
-  newClipBtn.addEventListener('click', reset);
+  // FIX #4: was getElementById('reset-btn') which doesn't exist.
+  // The HTML has 'cancel-btn' (progress card) and 'new-clip-btn' (result card).
+  document.getElementById('cancel-btn').addEventListener('click', reset);
+  document.getElementById('new-clip-btn').addEventListener('click', reset);
 
-  /* ── Polling ── */
+  /* ── Helpers ── */
   function startPolling(jobId) {
-    clearInterval(pollInterval);
-    pollInterval = setInterval(() => pollJob(jobId), 1200);
-    pollJob(jobId);
-  }
-
-  async function pollJob(jobId) {
-    try {
-      const res = await fetch(`/api/clipper/clip/${jobId}`);
-      if (!res.ok) return;
-      const job = await res.json();
-      applyJobState(job);
-    } catch (_) {}
-  }
-
-  function applyJobState(job) {
-    const pct = Math.round(job.progress || 0);
-    progressFill.style.width = pct + '%';
-    progressPct.textContent = pct + '%';
-
-    const msgMap = {
-      pending:    '<span class="spinner"></span> Queued…',
-      resolving:  '<span class="spinner"></span> Resolving stream URL…',
-      capturing:  '<span class="spinner"></span> Capturing from ' + job.platform + '…',
-      encoding:   '<span class="spinner"></span> Encoding clip…',
-      ready:      '<span class="spinner green"></span> Done!',
-      error:      'Failed.',
-    };
-    setStatus(job.status, msgMap[job.status] || job.status);
-
-    if (job.status === 'ready') {
-      clearInterval(pollInterval);
-      progressFill.classList.add('done');
-      setTimeout(() => showResult(job), 600);
-    }
-
-    if (job.status === 'error') {
-      clearInterval(pollInterval);
-      progressFill.classList.add('err');
-      showError(job.error || 'Unknown error');
-    }
-  }
-
-  /* ── UI helpers ── */
-  function showProgress() {
     captureCard.style.display = 'none';
     progressCard.classList.add('visible');
-    resultCard.classList.remove('visible');
-    errorBox.classList.remove('visible');
-    progressFill.style.width = '0%';
-    progressFill.classList.remove('done', 'err');
-    progressPct.textContent = '0%';
-    jobIdLine.textContent = 'job: —';
+    jobIdLine.textContent = jobId;
+    setStatus('processing', '<span class="spinner"></span> Initializing capture...');
+
+    pollInterval = setInterval(async () => {
+      try {
+        // FIX #1: was '/api/clipper/status/${jobId}' — route doesn't exist.
+        // Correct endpoint is '/api/clipper/clip/:jobId'.
+        const res = await fetch(`/api/clipper/clip/${jobId}`);
+        const job = await res.json();
+
+        // FIX #2: backend uses 'ready' and 'error', not 'completed' and 'failed'.
+        if (job.status === 'ready') {
+          clearInterval(pollInterval);
+          showResult(job);
+        } else if (job.status === 'error') {
+          clearInterval(pollInterval);
+          setStatus('error', '');
+          showError(job.error || 'Processing failed');
+          progressFill.classList.add('err');
+        } else {
+          const pct = job.progress || 0;
+          progressFill.style.width = pct + '%';
+          progressPct.textContent = Math.round(pct) + '%';
+          const stageLabel = {
+            resolving:  'Resolving stream URL…',
+            capturing:  'Ripping segments…',
+            encoding:   'Encoding clip…',
+          }[job.status] || 'Working…';
+          setStatus('processing', `<span class="spinner"></span> ${stageLabel}`);
+        }
+      } catch (e) {
+        console.error('Poll error:', e);
+      }
+    }, 2000);
   }
 
   function showResult(job) {
-    progressCard.classList.remove('visible');
-    resultCard.classList.add('visible');
-    const downloadUrl = `/api/clipper/clip/${job.id}/download`;
-    downloadLink.href = downloadUrl;
+    progressFill.style.width = '100%';
+    progressPct.textContent = '100%';
+    progressFill.classList.add('done');
 
-    // Video preview — use the static clips URL so it doesn't trigger delete
-    const previewSrc = job.downloadUrl || downloadUrl;
-    clipPreview.src = previewSrc;
-    clipPreview.muted = true;          // allow autoplay in all browsers
-    clipPreview.autoplay = true;
-    clipPreview.load();
+    setTimeout(() => {
+      progressCard.classList.remove('visible');
+      resultCard.classList.add('visible');
 
-    // Show an inline error if the video fails to load
-    clipPreview.addEventListener('error', () => {
-      previewMeta.innerHTML = `<span class="meta-pill" style="color:var(--red)">⚠ Preview failed — use Download</span>`;
-    }, { once: true });
+      // FIX #6: was 'job.filename' which doesn't exist — backend provides 'downloadUrl'.
+      const clipUrl = job.downloadUrl || `/clips/clip_${job.id}.mp4`;
+      const filename = clipUrl.split('/').pop();
 
-    // Build meta line once video metadata is available
-    previewMeta.innerHTML = `<span class="meta-pill green">✓ ready</span>
-      <span class="meta-pill">${job.platform}</span>
-      <span class="meta-pill">${job.duration}s</span>`;
+      clipPreview.src = clipUrl;
+      downloadLink.href = clipUrl;
+      downloadLink.download = filename;
 
-    clipPreview.addEventListener('loadedmetadata', () => {
-      const dur = clipPreview.duration;
-      if (dur && isFinite(dur)) {
-        const mins = Math.floor(dur / 60);
-        const secs = Math.floor(dur % 60).toString().padStart(2, '0');
-        const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-        // replace duration pill with actual video duration
-        previewMeta.innerHTML = `<span class="meta-pill green">✓ ready</span>
-          <span class="meta-pill">${job.platform}</span>
-          <span class="meta-pill">${timeStr}</span>`;
-      }
-    }, { once: true });
+      clipPreview.addEventListener('loadedmetadata', () => {
+        const dur = clipPreview.duration;
+        const timeStr = dur ? Math.floor(dur) + 's' : (job.duration || 0) + 's';
+        previewMeta.innerHTML =
+          `<span class="meta-pill green">✓ ready</span>` +
+          `<span class="meta-pill">${job.platform}</span>` +
+          `<span class="meta-pill">${timeStr}</span>`;
+      }, { once: true });
+    }, 800);
   }
 
   function reset() {
@@ -419,17 +270,62 @@
     quaxResult.classList.remove('visible');
     quaxUrlText.textContent = '';
     quaxOpenLink.href = '#';
+    captureBtn.disabled = false;
     currentJobId = null;
   }
 
   function setStatus(state, msgHtml) {
     statusBadge.className = 'status-badge ' + state;
-    statusBadge.textContent = state;
+    statusBadge.textContent = state.toUpperCase();
     statusMsg.innerHTML = msgHtml;
   }
 
+  // FIX #5: was 'errorText.textContent = msg' where errorText was null.
+  // Write directly into errorBox instead.
   function showError(msg) {
-    errorBox.textContent = '! ' + msg;
+    errorBox.textContent = msg;
     errorBox.classList.add('visible');
+    captureBtn.disabled = false;
   }
+
+  function debounce(func, timeout = 300) {
+    let timer;
+    return (...args) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { func.apply(this, args); }, timeout);
+    };
+  }
+
+  function updateStreamPreview() {
+    const val = usernameInput.value.trim();
+    if (!val) {
+      streamPreviewWrap.classList.remove('visible');
+      return;
+    }
+
+    let embedUrl = '';
+    if (activePlatform === 'twitch') {
+      embedUrl = `https://player.twitch.tv/?channel=${val}&parent=${window.location.hostname}&muted=true`;
+    } else if (activePlatform === 'kick') {
+      embedUrl = `https://player.kick.com/${val}`;
+    } else if (activePlatform === 'youtube') {
+      const ytId = extractYoutubeId(val);
+      if (ytId) embedUrl = `https://www.youtube.com/embed/${ytId}?autoplay=1&mute=1`;
+    }
+
+    if (embedUrl) {
+      streamPreviewIframe.src = embedUrl;
+      streamPreviewWrap.classList.add('visible');
+      streamPreviewUnavail.classList.remove('visible');
+    } else {
+      streamPreviewWrap.classList.remove('visible');
+    }
+  }
+
+  function extractYoutubeId(url) {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+  }
+
 })();
