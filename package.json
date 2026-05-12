@@ -1,6 +1,6 @@
 {
   "name": "clipper",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Multi-platform live stream clipper for YouTube, Twitch, Kick, and Odysee",
   "main": "clipper.js",
   "type": "commonjs",
