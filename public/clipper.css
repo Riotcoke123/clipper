@@ -186,13 +186,6 @@ header p {
   background: rgba(83, 252, 24, 0.08);
 }
 
-.platform-chip[data-platform="odysee"]:hover,
-.platform-chip[data-platform="odysee"].active {
-  border-color: #E9130B;
-  color: #E9130B;
-  background: rgba(233, 19, 11, 0.08);
-}
-
 .platform-chip .dot {
   width: 7px;
   height: 7px;
@@ -731,6 +724,7 @@ footer a:hover {
 .btn-catbox:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  pointer-events: none; /* belt-and-suspenders: blocks queued touch events on mobile */
 }
 
 .catbox-status {
@@ -819,18 +813,14 @@ footer a:hover {
 
 /* ── Mobile Responsiveness ── */
 @media (max-width: 600px) {
-  /* Reduce outer body padding for smaller screens */
   body {
     padding: 20px 15px 30px;
   }
 
-  /* Scale down the main header slightly */
   header h1 {
     font-size: 26px;
   }
 
-  /* Make platform chips slightly more compact so they fit better in a row */
-  /* min-height: 44px keeps them within Apple's recommended touch-target size */
   .platform-chip {
     padding: 6px 12px;
     font-size: 12px;
@@ -849,13 +839,11 @@ footer a:hover {
     font-size: 16px;
   }
 
-  /* Stack the Duration and Quality inputs instead of the 1fr 1fr grid */
   .controls-row {
     grid-template-columns: 1fr;
     gap: 16px;
   }
 
-  /* Ensure 44px min-height touch target on all action buttons */
   .btn-capture,
   .btn-secondary,
   .btn-catbox,
@@ -864,7 +852,6 @@ footer a:hover {
     min-height: 44px;
   }
 
-  /* Stack the three-button result row on smaller screens */
   .result-actions-row {
     flex-direction: column;
     gap: 10px;
@@ -877,14 +864,24 @@ footer a:hover {
     padding: 12px;
   }
 
-  /* Ensure the video preview scales well without being too tall */
   #clip-preview {
     max-height: 240px;
   }
-  
-  /* Shrink text in the stream preview label to prevent overflow */
+
   .stream-preview-label {
     font-size: 10px;
     padding: 6px 10px;
+  }
+
+  /*
+   * MOBILE CRITICAL: Hide the stream-preview iframe on mobile.
+   * The embedded player (especially Kick's) captures touch events and
+   * makes the "Capture Clip" button appear unresponsive — taps land on
+   * the iframe instead of the button. The preview is a desktop nice-to-have;
+   * on mobile it actively breaks the primary action.
+   */
+  .stream-preview-wrap,
+  .stream-preview-wrap.visible {
+    display: none !important;
   }
 }

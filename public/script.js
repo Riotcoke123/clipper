@@ -4,12 +4,13 @@
   let activePlatform = 'youtube';
   let pollInterval = null;
   let currentJobId = null;
+  let catboxUploading = false;
+  let quaxUploading = false;
 
   const PLATFORM_HINTS = {
     youtube: 'paste a full live URL',
     twitch:  'e.g. xqc',
-    kick:    'e.g. xqc',
-    odysee:  'e.g. @DistroWatch — or paste an Odysee channel URL',
+    kick:    'paste a full live URL  —  kick.com/username',
   };
 
   /* ── Elements ── */
@@ -33,8 +34,7 @@
 
   const clipPreview   = document.getElementById('clip-preview');
   const previewMeta   = document.getElementById('preview-meta');
-  // FIX #3: was 'download-btn' — the HTML element is 'download-link'
-  const downloadLink  = document.getElementById('download-link');
+  const downloadLink  = document.getElementById('download-link'); // was 'download-btn' — doesn't exist
 
   const catboxBtn     = document.getElementById('catbox-btn');
   const catboxStatus  = document.getElementById('catbox-status');
@@ -48,17 +48,17 @@
   const quaxUrlText   = document.getElementById('quax-url-text');
   const quaxOpenLink  = document.getElementById('quax-open-link');
 
-  // FIX #5: was getElementById('error-text') which doesn't exist in HTML.
-  // errorBox itself holds the message text.
+  // errorBox holds the message text directly — there is no inner #error-text span
   const errorBox      = document.getElementById('error-box');
 
-  const streamPreviewWrap    = document.getElementById('stream-preview-wrap');
-  const streamPreviewIframe  = document.getElementById('stream-preview-iframe');
+  const streamPreviewWrap   = document.getElementById('stream-preview-wrap');
+  const streamPreviewIframe = document.getElementById('stream-preview-iframe');
   const streamPreviewUnavail = document.getElementById('stream-preview-unavail');
 
   /* ── Initialization ── */
   async function init() {
     try {
+      // Get the key from your .env via the backend bridge
       const res = await fetch('/api/clipper/config');
       const config = await res.json();
       API_KEY = config.apiKey;
@@ -106,9 +106,9 @@
 
       const res = await fetch('/api/clipper/clip', {
         method: 'POST',
-        headers: {
+        headers: { 
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${API_KEY}`
+          'Authorization': `Bearer ${API_KEY}` 
         },
         body: JSON.stringify(payload),
       });
@@ -126,14 +126,17 @@
   });
 
   catboxBtn.addEventListener('click', async () => {
-    if (!currentJobId) return;
+    if (!currentJobId || catboxUploading) return;
+    catboxUploading = true;
     try {
       catboxBtn.disabled = true;
       catboxStatus.innerHTML = '<span class="spinner"></span> Uploading to Catbox...';
-
-      const res = await fetch(`/api/clipper/clip/${currentJobId}/catbox`, {
+      
+      const res = await fetch(`/api/clipper/clip/${currentJobId}/catbox`, { 
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${API_KEY}` }
+        headers: { 
+          'Authorization': `Bearer ${API_KEY}` 
+        }
       });
       const data = await res.json();
 
@@ -146,18 +149,22 @@
     } catch (err) {
       catboxStatus.innerHTML = `❌ ${err.message}`;
       catboxBtn.disabled = false;
+      catboxUploading = false;
     }
   });
 
   quaxBtn.addEventListener('click', async () => {
-    if (!currentJobId) return;
+    if (!currentJobId || quaxUploading) return;
+    quaxUploading = true;
     try {
       quaxBtn.disabled = true;
       quaxStatus.innerHTML = '<span class="spinner"></span> Uploading to qu.ax...';
-
-      const res = await fetch(`/api/clipper/clip/${currentJobId}/quax`, {
+      
+      const res = await fetch(`/api/clipper/clip/${currentJobId}/quax`, { 
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${API_KEY}` }
+        headers: { 
+          'Authorization': `Bearer ${API_KEY}` 
+        }
       });
       const data = await res.json();
 
@@ -170,11 +177,13 @@
     } catch (err) {
       quaxStatus.innerHTML = `❌ ${err.message}`;
       quaxBtn.disabled = false;
+      quaxUploading = false;
     }
   });
 
-  // FIX #4: was getElementById('reset-btn') which doesn't exist.
-  // The HTML has 'cancel-btn' (progress card) and 'new-clip-btn' (result card).
+  // 'reset-btn' doesn't exist in HTML. The two reset buttons are:
+  //   #cancel-btn  — in the progress card
+  //   #new-clip-btn — in the result card
   document.getElementById('cancel-btn').addEventListener('click', reset);
   document.getElementById('new-clip-btn').addEventListener('click', reset);
 
@@ -183,34 +192,27 @@
     captureCard.style.display = 'none';
     progressCard.classList.add('visible');
     jobIdLine.textContent = jobId;
-    setStatus('processing', '<span class="spinner"></span> Initializing capture...');
+    setStatus('processing', 'Initializing capture...');
 
     pollInterval = setInterval(async () => {
       try {
-        // FIX #1: was '/api/clipper/status/${jobId}' — route doesn't exist.
-        // Correct endpoint is '/api/clipper/clip/:jobId'.
         const res = await fetch(`/api/clipper/clip/${jobId}`);
         const job = await res.json();
 
-        // FIX #2: backend uses 'ready' and 'error', not 'completed' and 'failed'.
         if (job.status === 'ready') {
           clearInterval(pollInterval);
           showResult(job);
         } else if (job.status === 'error') {
           clearInterval(pollInterval);
-          setStatus('error', '');
           showError(job.error || 'Processing failed');
           progressFill.classList.add('err');
         } else {
           const pct = job.progress || 0;
           progressFill.style.width = pct + '%';
           progressPct.textContent = Math.round(pct) + '%';
-          const stageLabel = {
-            resolving:  'Resolving stream URL…',
-            capturing:  'Ripping segments…',
-            encoding:   'Encoding clip…',
-          }[job.status] || 'Working…';
-          setStatus('processing', `<span class="spinner"></span> ${stageLabel}`);
+          if (pct > 0) {
+            setStatus('processing', job.stage || 'Ripping segments...');
+          }
         }
       } catch (e) {
         console.error('Poll error:', e);
@@ -222,26 +224,26 @@
     progressFill.style.width = '100%';
     progressPct.textContent = '100%';
     progressFill.classList.add('done');
-
+    
     setTimeout(() => {
       progressCard.classList.remove('visible');
       resultCard.classList.add('visible');
-
-      // FIX #6: was 'job.filename' which doesn't exist — backend provides 'downloadUrl'.
+      
       const clipUrl = job.downloadUrl || `/clips/clip_${job.id}.mp4`;
       const filename = clipUrl.split('/').pop();
-
       clipPreview.src = clipUrl;
+      clipPreview.muted = true;   // required for autoplay on mobile
+      clipPreview.load();          // forces load on iOS/Android without a user gesture
+      clipPreview.play().catch(() => {}); // show first frame; ignore autoplay rejection
       downloadLink.href = clipUrl;
       downloadLink.download = filename;
 
       clipPreview.addEventListener('loadedmetadata', () => {
-        const dur = clipPreview.duration;
-        const timeStr = dur ? Math.floor(dur) + 's' : (job.duration || 0) + 's';
-        previewMeta.innerHTML =
-          `<span class="meta-pill green">✓ ready</span>` +
-          `<span class="meta-pill">${job.platform}</span>` +
-          `<span class="meta-pill">${timeStr}</span>`;
+        const duration = clipPreview.duration;
+        const timeStr = duration ? Math.floor(duration) + 's' : job.duration + 's';
+        previewMeta.innerHTML = `<span class="meta-pill green">✓ ready</span>
+          <span class="meta-pill">${job.platform}</span>
+          <span class="meta-pill">${timeStr}</span>`;
       }, { once: true });
     }, 800);
   }
@@ -261,11 +263,13 @@
     streamPreviewUnavail.classList.remove('visible');
     usernameInput.value = '';
     catboxBtn.disabled = false;
+    catboxUploading = false;
     catboxStatus.innerHTML = '';
     catboxResult.classList.remove('visible');
     catboxUrlText.textContent = '';
     catboxOpenLink.href = '#';
     quaxBtn.disabled = false;
+    quaxUploading = false;
     quaxStatus.innerHTML = '';
     quaxResult.classList.remove('visible');
     quaxUrlText.textContent = '';
@@ -280,8 +284,6 @@
     statusMsg.innerHTML = msgHtml;
   }
 
-  // FIX #5: was 'errorText.textContent = msg' where errorText was null.
-  // Write directly into errorBox instead.
   function showError(msg) {
     errorBox.textContent = msg;
     errorBox.classList.add('visible');
@@ -297,6 +299,14 @@
   }
 
   function updateStreamPreview() {
+    // Never show the live preview on mobile — the embedded player (especially
+    // Kick's) captures touch events and makes "Capture Clip" unresponsive.
+    if (window.matchMedia('(max-width: 600px)').matches) {
+      streamPreviewWrap.classList.remove('visible');
+      streamPreviewIframe.src = 'about:blank';
+      return;
+    }
+
     const val = usernameInput.value.trim();
     if (!val) {
       streamPreviewWrap.classList.remove('visible');
@@ -307,7 +317,10 @@
     if (activePlatform === 'twitch') {
       embedUrl = `https://player.twitch.tv/?channel=${val}&parent=${window.location.hostname}&muted=true`;
     } else if (activePlatform === 'kick') {
-      embedUrl = `https://player.kick.com/${val}`;
+      // Extract slug from full URL if pasted
+      let kickSlug = val;
+      try { kickSlug = new URL(val).pathname.replace(/^\//, '').split('/')[0]; } catch (_) {}
+      embedUrl = `https://player.kick.com/${kickSlug}`;
     } else if (activePlatform === 'youtube') {
       const ytId = extractYoutubeId(val);
       if (ytId) embedUrl = `https://www.youtube.com/embed/${ytId}?autoplay=1&mute=1`;
