@@ -14,20 +14,17 @@ const Database = require('better-sqlite3');
 /* ============================================================
    CONFIG
    ============================================================ */
-const CLIP_OUTPUT_DIR  = process.env.CLIP_OUTPUT_DIR  || path.join(__dirname, 'public', 'clips');
-const CLIP_TEMP_DIR    = process.env.CLIP_TEMP_DIR    || path.join(__dirname, 'temp');
-const KICK_API_BASE    = process.env.KICK_API_BASE    || 'https://api.kick.com';
-const KICK_AUTH_BASE   = process.env.KICK_AUTH_BASE   || 'https://id.kick.com';
-const KICK_CLIENT_ID   = process.env.KICK_CLIENT_ID   || '';
+const CLIP_OUTPUT_DIR    = process.env.CLIP_OUTPUT_DIR  || path.join(__dirname, 'public', 'clips');
+const CLIP_TEMP_DIR      = process.env.CLIP_TEMP_DIR    || path.join(__dirname, 'temp');
+const KICK_API_BASE      = process.env.KICK_API_BASE    || 'https://api.kick.com';
+const KICK_AUTH_BASE     = process.env.KICK_AUTH_BASE   || 'https://id.kick.com';
+const KICK_CLIENT_ID     = process.env.KICK_CLIENT_ID   || '';
 const KICK_CLIENT_SECRET = process.env.KICK_CLIENT_SECRET || '';
-const YOUTUBE_API_KEY  = process.env.YOUTUBE_API_KEY  || '';
-const ODYSEE_LIVE_API  = process.env.ODYSEE_LIVE_API  || 'https://api.odysee.live';
-const ODYSEE_SDK_PROXY = process.env.ODYSEE_SDK_PROXY || 'https://api.na-backend.odysee.com';
-const ODYSEE_COOKIE    = process.env.ODYSEE_COOKIE    || '';
-const CATBOX_USERHASH  = process.env.CATBOX_USERHASH  || '';
-const MAX_CLIP_SECONDS  = Number(process.env.MAX_CLIP_SECONDS)  || 300;
-const DEFAULT_CLIP_SECS = Number(process.env.DEFAULT_CLIP_SECS) || 60;
-const DB_PATH           = process.env.DB_PATH || path.join(__dirname, 'clipper.db');
+const YOUTUBE_API_KEY    = process.env.YOUTUBE_API_KEY  || '';
+const CATBOX_USERHASH    = process.env.CATBOX_USERHASH  || '';
+const MAX_CLIP_SECONDS   = Number(process.env.MAX_CLIP_SECONDS)  || 300;
+const DEFAULT_CLIP_SECS  = Number(process.env.DEFAULT_CLIP_SECS) || 60;
+const DB_PATH            = process.env.DB_PATH || path.join(__dirname, 'clipper.db');
 
 /* ── Security ─────────────────────────────────────────────── */
 // Set CLIPPER_API_KEY in your environment to require an Authorization header
@@ -53,12 +50,11 @@ const RATE_LIMIT_MAX_REQ    = Number(process.env.RATE_LIMIT_MAX_REQ)    || 10;
 const ALLOWED_STREAM_HOSTS = new Set([
   'www.youtube.com', 'youtube.com', 'm.youtube.com',
   'www.twitch.tv',   'twitch.tv',
-  'kick.com',        'www.kick.com',
-  'odysee.com',      'www.odysee.com',
+  'kick.com',        'www.kick.com',  'm.kick.com',
 ]);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const VALID_PLATFORMS = ['youtube', 'twitch', 'kick', 'odysee'];
+const VALID_PLATFORMS = ['youtube', 'twitch', 'kick'];
 const VALID_QUALITIES  = ['low', 'medium', 'high'];
 
 /* Ensure directories exist */
@@ -189,8 +185,8 @@ function sanitizeUsername(raw) {
   const s = raw.trim();
   if (!s) throw new Error('username is empty');
   if (s.length > 128) throw new Error('username too long (max 128 chars)');
-  // Keep word chars, @, :, ., /, - — everything else becomes _
-  return s.replace(/[^\w@:./-]/g, '_');
+  // Keep word chars, @, :, ., /, -, and URL query-string chars (?, =, &) — everything else becomes _
+  return s.replace(/[^\w@:./?=&-]/g, '_');
 }
 
 /**
@@ -277,202 +273,126 @@ let _activeJobs = 0;
    ============================================================ */
 
 /**
- * YouTube — resolve a live stream to a direct watch?v= URL using the Data API,
- * so yt-dlp uses the fast [youtube] extractor instead of the fragile [youtube:tab]
- * channel-page scraper (which 404s when the channel has no active live tab).
+ * YouTube — uses the Data API to resolve a handle to a live video ID,
+ * then returns type:'ytdlp' with the direct watch?v= URL.
  *
- * Falls back to the @handle/live channel URL if YOUTUBE_API_KEY is absent or the
- * lookup fails (e.g. quota exhausted).
+ * The yt-dlp download path uses player_client=android which hits YouTube's InnerTube API
+ * mobile innertube API and avoids the [youtube:tab] channel-page scraper
+ * that 404s when the live tab is absent or the video is unlisted.
  */
 async function resolveYouTube(username) {
-  // Full URL supplied — pass straight through; a direct watch?v= URL already uses
-  // the [youtube] extractor so there's no tab scrape.
   if (username.startsWith('http')) {
     assertSafeUrl(username);
-    return { type: 'ytdlp', url: username };
+    // Fall through with this as watchUrl so it gets the same HLS pre-resolution below.
+    const watchUrl = username;
+    try {
+      const hlsUrl = await ytDlpGetUrl(watchUrl, [
+        '--extractor-args', 'youtube:player_client=android',
+        '--format', 'best[protocol^=m3u8][height<=1080]/best[protocol^=m3u8]/best',
+      ]);
+      console.log(`[YouTube] Resolved HLS URL for ${watchUrl}`);
+      return { type: 'hls', url: hlsUrl };
+    } catch (err) {
+      console.warn(`[YouTube] --get-url failed (${err.message}), falling back to ytdlp mode`);
+      return { type: 'ytdlp', url: watchUrl };
+    }
   }
 
   const handle = username.replace(/^@/, '');
+  let watchUrl = null;
 
-  // ── Try YouTube Data API v3 to get a direct video ID ────────────────────
   if (YOUTUBE_API_KEY) {
     try {
-      // Step 1: resolve @handle → channel ID
       const chRes = await fetch(
         `https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${encodeURIComponent(handle)}&key=${YOUTUBE_API_KEY}`
       );
       if (chRes.ok) {
-        const chJson = await chRes.json();
-        const channelId = chJson?.items?.[0]?.id;
+        const channelId = (await chRes.json())?.items?.[0]?.id;
         if (channelId) {
-          // Step 2: find an active live broadcast
           const srRes = await fetch(
             `https://www.googleapis.com/youtube/v3/search?part=id&channelId=${encodeURIComponent(channelId)}&eventType=live&type=video&key=${YOUTUBE_API_KEY}`
           );
           if (srRes.ok) {
-            const srJson = await srRes.json();
-            const videoId = srJson?.items?.[0]?.id?.videoId;
+            const videoId = (await srRes.json())?.items?.[0]?.id?.videoId;
             if (videoId) {
-              console.log(`[YouTube] Resolved @${handle} -> watch?v=${videoId} via Data API`);
-              return { type: 'ytdlp', url: `https://www.youtube.com/watch?v=${videoId}` };
+              console.log(`[YouTube] Data API: @${handle} -> watch?v=${videoId}`);
+              watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
             }
           }
         }
       }
     } catch (err) {
-      console.warn(`[YouTube] Data API lookup failed (${err.message}), falling back to channel URL`);
+      console.warn(`[YouTube] Data API failed (${err.message})`);
     }
   }
 
-  // ── Fallback: channel live-tab URL ───────────────────────────────────────
-  // Uses [youtube:tab] — can 404 if the channel has no active live tab.
-  console.warn(`[YouTube] Falling back to @${handle}/live tab URL (may 404 if not live)`);
-  return { type: 'ytdlp', url: `https://www.youtube.com/@${encodeURIComponent(handle)}/live` };
+  if (!watchUrl) {
+    console.warn(`[YouTube] Falling back to @${handle}/live`);
+    watchUrl = `https://www.youtube.com/@${encodeURIComponent(handle)}/live`;
+  }
+
+  // Pre-resolve to a direct HLS manifest URL.
+  //
+  // Reasons:
+  //  1. Avoids the [youtube:tab] channel-page scraper entirely — ios+web player
+  //     clients hit YouTube's innertube API directly and work even when the tab
+  //     endpoint 404s.
+  //  2. Lets captureClip use ffmpeg -t (reliable live clipping) instead of
+  //     yt-dlp --download-sections (designed for VODs, unreliable on live HLS).
+  try {
+    const hlsUrl = await ytDlpGetUrl(watchUrl, [
+      '--extractor-args', 'youtube:player_client=android',
+      '--format', 'best[protocol^=m3u8][height<=1080]/best[protocol^=m3u8]/best',
+    ]);
+    console.log(`[YouTube] Resolved HLS URL for ${watchUrl}`);
+    return { type: 'hls', url: hlsUrl };
+  } catch (err) {
+    // Last-ditch fallback: hand the page URL to yt-dlp and let it figure it out.
+    console.warn(`[YouTube] --get-url failed (${err.message}), falling back to ytdlp mode`);
+    return { type: 'ytdlp', url: watchUrl };
+  }
 }
 
 /**
  * Twitch — yt-dlp handles OAuth-less public stream extraction perfectly.
  * We never accept a raw URL from the caller to prevent SSRF.
  */
+/**
+ * Twitch — pre-resolve to a direct HLS URL so captureClip can use
+ * ffmpeg -t (live-edge clipping) instead of yt-dlp --download-sections.
+ */
 async function resolveTwitch(username) {
   const handle = encodeURIComponent(username.replace(/^https?:\/\/[^/]+\//i, '').split('/')[0]);
-  return { type: 'ytdlp', url: `https://www.twitch.tv/${handle}` };
+  const pageUrl = `https://www.twitch.tv/${handle}`;
+  try {
+    const hlsUrl = await ytDlpGetUrl(pageUrl, ['--format', 'best[protocol^=m3u8]/best']);
+    console.log(`[Twitch] Resolved HLS URL for ${handle}`);
+    return { type: 'hls', url: hlsUrl };
+  } catch (err) {
+    console.warn(`[Twitch] --get-url failed (${err.message}), falling back to ytdlp mode`);
+    return { type: 'ytdlp', url: pageUrl };
+  }
 }
 
-/**
- * Kick — obtain an OAuth2 client-credentials token, hit the Kick public API to
- * get the channel's live playback URL, and return it as type:'hls' so the
- * captureClip engine feeds it directly to ffmpeg (bypassing yt-dlp and libcurl,
- * which fail to reach Kick's AWS IVS CDN on some server networks).
- *
- * Falls back to yt-dlp if credentials are missing or the API call fails.
- */
 async function resolveKick(username) {
-  // Strip any URL prefix — we only want the channel slug
-  const handle = username.replace(/^https?:\/\/[^/]+\//i, '').split('/')[0];
-  const safeHandle = encodeURIComponent(handle);
-
-  if (KICK_CLIENT_ID && KICK_CLIENT_SECRET) {
-    try {
-      // ── 1. Get OAuth2 access token (client credentials flow) ─────────────
-      const tokenRes = await fetch(`${KICK_AUTH_BASE}/oauth/token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          grant_type:    'client_credentials',
-          client_id:     KICK_CLIENT_ID,
-          client_secret: KICK_CLIENT_SECRET,
-        }).toString(),
-      });
-      if (!tokenRes.ok) {
-        throw new Error(`Kick OAuth ${tokenRes.status}: ${await tokenRes.text()}`);
-      }
-      const { access_token } = await tokenRes.json();
-
-      // ── 2. Fetch channel info ─────────────────────────────────────────────
-      // Kick public API v1: GET /v1/channels/{slug}
-      const chRes = await fetch(`${KICK_API_BASE}/v1/channels/${safeHandle}`, {
-        headers: {
-          'Authorization': `Bearer ${access_token}`,
-          'Accept':        'application/json',
-        },
-      });
-      if (!chRes.ok) {
-        throw new Error(`Kick API ${chRes.status}: ${await chRes.text()}`);
-      }
-      const chJson = await chRes.json();
-
-      // The playback URL lives on the livestream sub-object
-      const playbackUrl =
-        chJson?.data?.livestream?.playback_url ||
-        chJson?.livestream?.playback_url;
-
-      if (playbackUrl) {
-        console.log(`[Kick] Got HLS URL via API for ${handle}`);
-        return { type: 'hls', url: playbackUrl };
-      }
-
-      // Channel exists but has no active livestream
-      throw new Error(`${handle} is not currently live on Kick`);
-
-    } catch (err) {
-      console.error(`[Kick] API failed (${err.message}), falling back to yt-dlp`);
-    }
-  }
-
-  // ── Fallback: yt-dlp (requires reachable CDN) ────────────────────────────
-  return { type: 'ytdlp', url: `https://kick.com/${safeHandle}` };
-}
-
-/**
- * Odysee — query the Odysee live API, then the SDK proxy,
- * to find the HLS manifest of a live channel.
- */
-async function resolveOdysee(username) {
-  // Username can arrive as "@Channel:claimId", "@Channel", or a full URL
-  let channelName = username;
+  let slug;
   if (username.startsWith('http')) {
-    // e.g. https://odysee.com/@Channel:abc — extract the handle
-    channelName = new URL(username).pathname.replace(/^\//, '');
-  }
-  // Strip leading @ if present
-  const handle = channelName.startsWith('@') ? channelName : `@${channelName}`;
-
-  // 1. Try the Odysee live API
-  try {
-    const liveRes = await fetch(
-      `${ODYSEE_LIVE_API}/api/v2?m=livestream.is_live`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(ODYSEE_COOKIE ? { Cookie: ODYSEE_COOKIE } : {}) },
-        body: JSON.stringify({ channel_name: handle }),
-      }
-    );
-    if (liveRes.ok) {
-      const liveJson = await liveRes.json();
-      const m3u8 = liveJson?.data?.VideoURL || liveJson?.data?.url;
-      if (m3u8) return { type: 'hls', url: m3u8 };
-    }
-  } catch (_) {}
-
-  // 2. Try the SDK proxy (resolve → lbry:// → check live endpoint)
-  try {
-    const resolveRes = await fetch(`${ODYSEE_SDK_PROXY}/api/v1/proxy`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        method: 'resolve',
-        params: { urls: [handle], include_is_my_output: false },
-      }),
-    });
-    if (resolveRes.ok) {
-      const rj = await resolveRes.json();
-      const claimId = rj?.result?.[handle]?.claim_id;
-      if (claimId) {
-        const liveUrl = `${ODYSEE_LIVE_API}/api/v2?m=livestream.get_active&channel_claim_id=${claimId}`;
-        const lr = await fetch(liveUrl, {
-          headers: ODYSEE_COOKIE ? { Cookie: ODYSEE_COOKIE } : {},
-        });
-        if (lr.ok) {
-          const lj = await lr.json();
-          const m3u8 = lj?.data?.VideoURL || lj?.data?.url;
-          if (m3u8) return { type: 'hls', url: m3u8 };
-        }
-      }
-    }
-  } catch (_) {}
-
-  // 3. Fallback: let yt-dlp resolve format + auth in one shot during captureClip
-  let pageUrl;
-  if (username.startsWith('http')) {
-    assertSafeUrl(username); // SSRF guard
-    pageUrl = username;
+    assertSafeUrl(username);
+    slug = new URL(username).pathname.replace(/^\//, '').split('/')[0];
   } else {
-    const handle = encodeURIComponent(username.replace(/^@/, ''));
-    pageUrl = `https://odysee.com/@${handle}`;
+    slug = username.replace(/^@/, '').split('/')[0].trim();
   }
-  return { type: 'ytdlp', url: pageUrl };
+  const pageUrl = `https://kick.com/${encodeURIComponent(slug)}`;
+  try {
+    const hlsUrl = await ytDlpGetUrl(pageUrl, ['--format', 'best[protocol^=m3u8]/best']);
+    console.log(`[Kick] Resolved HLS URL for ${slug}`);
+    return { type: 'hls', url: hlsUrl };
+  } catch (err) {
+    console.warn(`[Kick] --get-url failed (${err.message}), falling back to ytdlp mode`);
+    return { type: 'ytdlp', url: pageUrl };
+  }
 }
+
 
 /* ============================================================
    yt-dlp HELPER  — get a direct stream URL without downloading
@@ -521,7 +441,6 @@ async function resolveStreamUrl(platform, username) {
     case 'youtube': return resolveYouTube(username);
     case 'twitch':  return resolveTwitch(username);
     case 'kick':    return resolveKick(username);
-    case 'odysee':  return resolveOdysee(username);
     default:        throw new Error(`Unsupported platform: "${platform}"`);
   }
 }
@@ -533,7 +452,7 @@ async function resolveStreamUrl(platform, username) {
  * For FLV we pipe ffmpeg directly — yt-dlp can't download raw FLV by time.
  *
  * @param {string} jobId
- * @param {{ type: 'hls'|'flv', url: string }} stream
+ * @param {{ type: 'hls'|'flv'|'ytdlp', url: string }} stream
  * @param {number} duration  seconds
  * @param {'low'|'medium'|'high'} quality
  * @returns {Promise<string>} absolute path to the finished mp4
@@ -543,12 +462,11 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
   const tempRaw = path.join(CLIP_TEMP_DIR, `raw_${jobId}`);
 
   if (stream.type === 'flv' || stream.type === 'hls') {
-    // --- Direct-URL path: feed the stream URL straight into ffmpeg ---
-    // Used for:
+    // --- Direct-URL path: feed stream URL straight into ffmpeg ---
+    // Covers:
     //   'flv'  — raw FLV CDN streams
-    //   'hls'  — m3u8 URLs we resolved ourselves (e.g. via Kick/Odysee APIs)
-    //            ffmpeg's own HTTP stack is used here, completely bypassing
-    //            yt-dlp and libcurl (which fails to reach some CDNs).
+    //   'hls'  — m3u8 URLs resolved via platform APIs or yt-dlp --get-url
+    //            ffmpeg's own HTTP stack is used, bypassing libcurl entirely.
     return new Promise((resolve, reject) => {
       updateJob(jobId, { status: 'capturing', progress: 5 });
 
@@ -557,7 +475,13 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
                        : '854:-2';
 
       ffmpeg(stream.url)
-        .inputOptions(['-t', String(duration)])
+        .inputOptions([
+          // Reconnect on dropped segments — essential for live HLS
+          '-reconnect', '1',
+          '-reconnect_streamed', '1',
+          '-reconnect_delay_max', '5',
+          '-t', String(duration),
+        ])
         .videoCodec('libx264')
         .audioCodec('aac')
         .audioBitrate('128k')
@@ -569,8 +493,15 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
         ])
         .output(outFile)
         .on('progress', prog => {
-          const pct = Math.min(95, prog.percent || 0);
-          updateJob(jobId, { status: 'encoding', progress: pct });
+          // prog.percent is always 0 for live streams (no known total duration).
+          // Derive real progress from timemark (HH:MM:SS.ms) instead.
+          let pct = 0;
+          if (prog.timemark) {
+            const p = prog.timemark.split(':');
+            const secs = (+p[0]) * 3600 + (+p[1]) * 60 + parseFloat(p[2] || 0);
+            pct = Math.min(95, Math.round((secs / duration) * 100));
+          }
+          updateJob(jobId, { status: 'capturing', progress: pct });
         })
         .on('end', () => {
           updateJob(jobId, { status: 'ready', progress: 100, outputFile: outFile });
@@ -602,8 +533,9 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
       '--retries', '3',
       '--fragment-retries', '3',
       '--format', formatArg,
-      // Use Python's urllib instead of libcurl (avoids curl CDN connectivity issues
-      // on certain server networks). Time-limit via --download-sections.
+      // android player_client uses InnerTube without requiring a PO Token,
+      // which ios and web both now demand on VPS/datacenter IPs.
+      '--extractor-args', 'youtube:player_client=android',
       '--downloader', 'native',
       '--download-sections', `*0-${duration}`,
       '-o', tempFile,
@@ -677,7 +609,7 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
  * Start a clip job asynchronously. Returns the job object immediately.
  *
  * @param {Object} opts
- * @param {string} opts.platform   'youtube'|'twitch'|'kick'|'odysee'
+ * @param {string} opts.platform   'youtube'|'twitch'|'kick'
  * @param {string} opts.username   channel handle / URL
  * @param {number} [opts.duration] seconds to capture (capped at MAX_CLIP_SECONDS)
  * @param {'low'|'medium'|'high'} [opts.quality]
@@ -988,11 +920,16 @@ router.get('/jobs', (req, res) => {
 router.get('/platforms', (_req, res) => {
   res.json({
     platforms: [
-      { id: 'youtube', label: 'YouTube',    usernameExample: 'mkbhd  OR  https://youtube.com/@mkbhd/live',  method: 'yt-dlp → HLS' },
-      { id: 'twitch',  label: 'Twitch',     usernameExample: 'xqc',                                          method: 'yt-dlp → HLS' },
-      { id: 'kick',    label: 'Kick',        usernameExample: 'xqc',                                          method: 'Kick API → HLS / yt-dlp fallback' },
-      { id: 'odysee',  label: 'Odysee',     usernameExample: '@DistroWatch  OR  https://odysee.com/@Channel', method: 'Odysee live API → HLS / yt-dlp fallback' },
+      { id: 'youtube', label: 'YouTube', usernameExample: 'mkbhd  OR  https://youtube.com/@mkbhd/live', method: 'yt-dlp → HLS' },
+      { id: 'twitch',  label: 'Twitch',  usernameExample: 'xqc',                                         method: 'yt-dlp → HLS' },
+      { id: 'kick',    label: 'Kick',    usernameExample: 'xqc',                                         method: 'Kick API → HLS / yt-dlp fallback' },
     ],
+  });
+});
+
+router.get('/config', (req, res) => {
+  res.json({
+    apiKey: process.env.CLIPPER_API_KEY
   });
 });
 
@@ -1021,11 +958,6 @@ if (require.main === module) {
       ? res.sendFile(page)
       : res.status(404).send('Place clipper.html + clipper.css in the public/ folder.');
   });
-router.get('/config', (req, res) => {
-  res.json({
-    apiKey: process.env.CLIPPER_API_KEY
-  });
-});
   app.listen(PORT, () => {
     console.log(`[Clipper] Standalone server on http://localhost:${PORT}`);
     console.log(`[Clipper] POST http://localhost:${PORT}/api/clipper/clip`);
