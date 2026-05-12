@@ -1,9 +1,10 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <!-- Prevent unwanted scaling on mobile inputs -->
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <!-- Match the browser UI to your dark background base -->
 <meta name="theme-color" content="#0c0e14">
 <meta name="description" content="Stream Clipper - Clip anything from YouTube, Twitch, and Kick.">
@@ -16,7 +17,7 @@
 
 <!-- Open Graph -->
 <meta property="og:title" content="Clip anything." />
-<meta property="og:description" content="" />
+<meta property="og:description" content="Clip live streams from YouTube, Twitch, and Kick in seconds. Set your duration, pick your quality, and capture highlights instantly." />
 <meta property="og:image" content="https://clipper.iceposeidon.network/og-image.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
@@ -25,7 +26,7 @@
 <!-- Twitter Card -->
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Clip anything." />
-<meta name="twitter:description" content="" />
+<meta name="twitter:description" content="Clip live streams from YouTube, Twitch, and Kick in seconds. Set your duration, pick your quality, and capture highlights instantly." />
 <meta name="twitter:image" content="https://clipper.iceposeidon.network/og-image.png" />
 <title>Stream Clipper</title>
 
@@ -47,7 +48,7 @@
   position:fixed full-screen overlay (a common mobile ad tactic that
   captures all touch events and makes the page appear frozen).
 -->
-<div style="position:relative; z-index:0; overflow:hidden; width:100%; min-height:1px; text-align:center;">
+<div class="ad-container">
   <script async type="application/javascript" src="https://a.magsrv.com/ad-provider.js"></script>
   <ins class="eas6a97888e2" data-zoneid="5923164"></ins>
   <script>(AdProvider = window.AdProvider || []).push({"serve": {}});</script>
@@ -165,7 +166,7 @@
     <div class="card-title">Clip ready</div>
 
     <div class="preview-wrap">
-      <video id="clip-preview" controls playsinline preload="metadata">
+      <video id="clip-preview" controls preload="metadata">
         Your browser doesn't support HTML5 video.
       </video>
       <div class="preview-meta" id="preview-meta"></div>
@@ -217,8 +218,12 @@
     <a href="mailto:riotcokemedia@iceposeidon.network">riotcokemedia@iceposeidon.network</a> ·
     <a href="https://iceposeidon.network/" target="_blank" rel="noopener noreferrer">ip2 streamer list</a>
   </footer>
+</div><br><br>
+<div class="ad-container">
+  <script async type="application/javascript" src="https://a.magsrv.com/ad-provider.js"></script>
+  <ins class="eas6a97888e2" data-zoneid="5925362"></ins>
+  <script>(AdProvider = window.AdProvider || []).push({"serve": {}});</script>
 </div>
-
-<script src="script.js"></script>
+<script src="script.js" defer></script>
 </body>
 </html>
