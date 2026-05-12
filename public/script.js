@@ -261,6 +261,7 @@
     streamPreviewWrap.classList.remove('visible');
     streamPreviewIframe.src = 'about:blank';
     streamPreviewUnavail.classList.remove('visible');
+    // shield is CSS-only; no JS state to clear
     usernameInput.value = '';
     catboxBtn.disabled = false;
     catboxUploading = false;
@@ -299,14 +300,6 @@
   }
 
   function updateStreamPreview() {
-    // Never show the live preview on mobile — the embedded player (especially
-    // Kick's) captures touch events and makes "Capture Clip" unresponsive.
-    if (window.matchMedia('(max-width: 600px)').matches) {
-      streamPreviewWrap.classList.remove('visible');
-      streamPreviewIframe.src = 'about:blank';
-      return;
-    }
-
     const val = usernameInput.value.trim();
     if (!val) {
       streamPreviewWrap.classList.remove('visible');

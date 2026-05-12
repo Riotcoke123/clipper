@@ -583,6 +583,22 @@ select:focus { border-color: var(--amber); }
   display: block;
 }
 
+/*
+ * Touch shield — sits above the iframe (z-index 1) on mobile only.
+ * Transparent so the video shows through; intercepts all pointer events
+ * before they reach the iframe, keeping buttons on the page tappable.
+ * Hidden on desktop (pointer-events handled normally there).
+ */
+.preview-mobile-shield {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: transparent;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .stream-preview-unavail {
   display: none;
   align-items: center;
@@ -874,14 +890,18 @@ footer a:hover {
   }
 
   /*
-   * MOBILE CRITICAL: Hide the stream-preview iframe on mobile.
-   * The embedded player (especially Kick's) captures touch events and
-   * makes the "Capture Clip" button appear unresponsive — taps land on
-   * the iframe instead of the button. The preview is a desktop nice-to-have;
-   * on mobile it actively breaks the primary action.
+   * MOBILE STREAM PREVIEW — horizontal compact strip.
+   * The iframe is preserved but covered by .preview-mobile-shield (display:block
+   * on mobile), a transparent pointer-events layer that intercepts all touch
+   * events before they can reach the iframe. This keeps the preview visible
+   * while ensuring taps on the Capture button aren't swallowed by the embed.
    */
-  .stream-preview-wrap,
-  .stream-preview-wrap.visible {
-    display: none !important;
+  .stream-preview-frame-wrap {
+    padding-top: 0;           /* override the 16:9 padding-top trick */
+    height: 170px;            /* compact fixed-height horizontal strip */
+  }
+
+  .preview-mobile-shield {
+    display: block;           /* only active on mobile */
   }
 }
