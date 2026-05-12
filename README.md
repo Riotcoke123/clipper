@@ -95,6 +95,6 @@ npm run prod</code></pre>
 </section>
 
 <footer>
-    <p>&copy; 2024 Riotcoke123 &bull; Licensed under GNU GENERAL PUBLIC LICENSE</p>
+    <p>Licensed under GNU GENERAL PUBLIC LICENSE</p>
 </footer>
 
