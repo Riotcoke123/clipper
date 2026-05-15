@@ -96,14 +96,20 @@ db.exec(`
     outputFile  TEXT,
     downloadUrl TEXT,
     error       TEXT,
-    createdAt   TEXT NOT NULL
+    createdAt   TEXT NOT NULL,
+    startOffset INTEGER NOT NULL DEFAULT 0
   )
 `);
 
+// Add startOffset column to existing DBs that pre-date this migration
+try {
+  db.exec(`ALTER TABLE jobs ADD COLUMN startOffset INTEGER NOT NULL DEFAULT 0`);
+} catch (_) { /* column already exists — ignore */ }
+
 // Prepared statements
 const stmtInsert = db.prepare(`
-  INSERT INTO jobs (id, platform, username, duration, status, progress, outputFile, downloadUrl, error, createdAt)
-  VALUES (@id, @platform, @username, @duration, @status, @progress, @outputFile, @downloadUrl, @error, @createdAt)
+  INSERT INTO jobs (id, platform, username, duration, status, progress, outputFile, downloadUrl, error, createdAt, startOffset)
+  VALUES (@id, @platform, @username, @duration, @status, @progress, @outputFile, @downloadUrl, @error, @createdAt, @startOffset)
 `);
 
 const stmtSelectOne = db.prepare('SELECT * FROM jobs WHERE id = ?');
@@ -114,7 +120,8 @@ const stmtUpdate = db.prepare(`
       progress    = COALESCE(@progress,    progress),
       outputFile  = COALESCE(@outputFile,  outputFile),
       downloadUrl = COALESCE(@downloadUrl, downloadUrl),
-      error       = COALESCE(@error,       error)
+      error       = COALESCE(@error,       error),
+      startOffset = COALESCE(@startOffset, startOffset)
   WHERE id = @id
 `);
 
@@ -154,6 +161,7 @@ function createJob(platform, username, duration) {
     downloadUrl: null,
     error: null,
     createdAt: new Date().toISOString(),
+    startOffset: 0,
   };
   stmtInsert.run(job);
   return job;
@@ -167,6 +175,7 @@ function updateJob(id, patch) {
     outputFile:  patch.outputFile  ?? null,
     downloadUrl: patch.downloadUrl ?? null,
     error:       patch.error       ?? null,
+    startOffset: patch.startOffset ?? null,
   });
 }
 
@@ -220,6 +229,26 @@ function assertValidJobId(id) {
  */
 function safeFilename(name) {
   return '"' + name.replace(/[\\"/\r\n]/g, '_') + '"';
+}
+
+/**
+ * Derive a short, filesystem-safe label from a username or stream URL.
+ * Full URLs like https://www.youtube.com/watch?v=XJ3Je8RxOiY are collapsed
+ * to just the meaningful identifier (video ID, channel slug, etc.) so that
+ * generated filenames stay readable.
+ */
+function shortLabel(raw) {
+  try {
+    const u = new URL(raw);
+    // YouTube watch URLs → video ID
+    const v = u.searchParams.get('v');
+    if (v) return v.replace(/[^\w-]/g, '_');
+    // Any other URL → last non-empty path segment
+    const seg = u.pathname.split('/').filter(Boolean).pop();
+    if (seg) return seg.replace(/[^\w@.-]/g, '_').slice(0, 40);
+  } catch (_) { /* not a URL — fall through */ }
+  // Plain username — strip URL-like chars that crept in via sanitizeUsername
+  return raw.replace(/[^\w@.-]/g, '_').slice(0, 40);
 }
 
 /**
@@ -457,7 +486,7 @@ async function resolveStreamUrl(platform, username) {
  * @param {'low'|'medium'|'high'} quality
  * @returns {Promise<string>} absolute path to the finished mp4
  */
-async function captureClip(jobId, stream, duration, quality = 'medium') {
+async function captureClip(jobId, stream, duration, quality = 'medium', startOffset = 0) {
   const outFile = path.join(CLIP_OUTPUT_DIR, `clip_${jobId}.mp4`);
   const tempRaw = path.join(CLIP_TEMP_DIR, `raw_${jobId}`);
 
@@ -474,14 +503,28 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
                        : quality === 'high' ? '1280:-2'
                        : '854:-2';
 
+      // -live_start_index 0  → read from the oldest available HLS segment (DVR buffer)
+      // -ss startOffset      → jump forward by the seconds lost to URL resolution,
+      //                        so the captured content begins at the moment the user
+      //                        clicked "Capture" rather than when ffmpeg finally started.
+      const inputOptions = [
+        // Reconnect on dropped segments — essential for live HLS
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
+        // Seek into the DVR buffer to the click moment
+        '-live_start_index', '0',
+      ];
+      if (startOffset > 0) {
+        inputOptions.push('-ss', String(startOffset));
+      }
+      inputOptions.push('-t', String(duration));
+
+      // Track last written progress so we never go backwards (Bug 2 fix)
+      let lastPct = 5;
+
       ffmpeg(stream.url)
-        .inputOptions([
-          // Reconnect on dropped segments — essential for live HLS
-          '-reconnect', '1',
-          '-reconnect_streamed', '1',
-          '-reconnect_delay_max', '5',
-          '-t', String(duration),
-        ])
+        .inputOptions(inputOptions)
         .videoCodec('libx264')
         .audioCodec('aac')
         .audioBitrate('128k')
@@ -495,12 +538,14 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
         .on('progress', prog => {
           // prog.percent is always 0 for live streams (no known total duration).
           // Derive real progress from timemark (HH:MM:SS.ms) instead.
-          let pct = 0;
-          if (prog.timemark) {
-            const p = prog.timemark.split(':');
-            const secs = (+p[0]) * 3600 + (+p[1]) * 60 + parseFloat(p[2] || 0);
-            pct = Math.min(95, Math.round((secs / duration) * 100));
-          }
+          // Only update when we have a real timemark AND progress moves forward.
+          if (!prog.timemark) return;
+          const p = prog.timemark.split(':');
+          const secs = (+p[0]) * 3600 + (+p[1]) * 60 + parseFloat(p[2] || 0);
+          if (secs <= 0) return;
+          const pct = Math.min(95, Math.round((secs / duration) * 100));
+          if (pct <= lastPct) return;           // never go backwards
+          lastPct = pct;
           updateJob(jobId, { status: 'capturing', progress: pct });
         })
         .on('end', () => {
@@ -527,6 +572,12 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
   await new Promise((resolve, reject) => {
     updateJob(jobId, { status: 'capturing', progress: 2 });
 
+    // startOffset shifts the section window to match the click time:
+    // *startOffset-(startOffset+duration) captures the segment that was live
+    // when the user pressed Capture, not when URL resolution finished.
+    const sectionStart = startOffset;
+    const sectionEnd   = startOffset + duration;
+
     const args = [
       '--no-playlist',
       '--socket-timeout', '20',
@@ -537,21 +588,25 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
       // which ios and web both now demand on VPS/datacenter IPs.
       '--extractor-args', 'youtube:player_client=android',
       '--downloader', 'native',
-      '--download-sections', `*0-${duration}`,
+      '--download-sections', `*${sectionStart}-${sectionEnd}`,
       '-o', tempFile,
       stream.url,
     ];
 
     const proc = spawn('yt-dlp', args);
     let stderr = '';
+    let lastDlPct = 2; // never let progress go backwards (Bug 2 fix)
 
     proc.stdout.on('data', data => {
       const out = data.toString();
       const m = out.match(/(\d+\.?\d*)%/);
       if (m) {
         // Map download progress to 2–70%
-        const pct = 2 + Math.min(68, parseFloat(m[1]) * 0.68);
-        updateJob(jobId, { progress: Math.round(pct) });
+        const pct = Math.round(2 + Math.min(68, parseFloat(m[1]) * 0.68));
+        if (pct > lastDlPct) {
+          lastDlPct = pct;
+          updateJob(jobId, { progress: pct });
+        }
       }
     });
     proc.stderr.on('data', d => { stderr += d.toString(); });
@@ -570,6 +625,8 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
                      : quality === 'high' ? '1280:-2'
                      : '854:-2';
 
+    let lastEncPct = 72; // never go backwards during encode (Bug 2 fix)
+
     ffmpeg(tempFile)
       .videoCodec('libx264')
       .audioCodec('aac')
@@ -581,8 +638,11 @@ async function captureClip(jobId, stream, duration, quality = 'medium') {
       ])
       .output(outFile)
       .on('progress', prog => {
-        const pct = 72 + Math.min(23, (prog.percent || 0) * 0.23);
-        updateJob(jobId, { progress: Math.round(pct) });
+        const pct = Math.round(72 + Math.min(23, (prog.percent || 0) * 0.23));
+        if (pct > lastEncPct) {
+          lastEncPct = pct;
+          updateJob(jobId, { progress: pct });
+        }
       })
       .on('end', () => {
         // Cleanup temp file
@@ -651,10 +711,16 @@ function startClip({ platform, username, duration, quality = 'medium' }) {
       const downloadUrl = `/clips/clip_${job.id}.mp4`;
       updateJob(job.id, { status: 'resolving', progress: 1, downloadUrl });
 
+      // Record the exact moment the user pressed Capture (job.createdAt) and
+      // measure how long URL resolution takes.  This offset is passed to
+      // captureClip so it can seek into the stream's DVR buffer and return
+      // content that started at the click moment rather than after resolution.
+      const resolveStart = Date.now();
       const stream = await resolveStreamUrl(normalPlatform, safeUser);
+      const startOffset = Math.round((Date.now() - resolveStart) / 1000);
 
-      updateJob(job.id, { status: 'capturing', progress: 2 });
-      const outFile = await captureClip(job.id, stream, secs, normalQuality);
+      updateJob(job.id, { status: 'capturing', progress: 2, startOffset });
+      const outFile = await captureClip(job.id, stream, secs, normalQuality, startOffset);
 
       updateJob(job.id, { status: 'ready', progress: 100, outputFile: outFile });
       console.log(`[Clipper] Job ${job.id} ready → ${outFile}`);
@@ -735,7 +801,7 @@ router.get('/clip/:jobId/download', (req, res) => {
 
   // Sanitize every field that goes into the filename to prevent header injection
   const safePlatform = (job.platform || 'unknown').replace(/[^\w]/g, '_');
-  const safeUser     = (job.username || 'unknown').replace(/[^\w@.-]/g, '_');
+  const safeUser     = shortLabel(job.username || 'unknown');
   const safeDur      = Number(job.duration) || 0;
   const filename     = safeFilename(`clip_${safePlatform}_${safeUser}_${safeDur}s.mp4`);
 
@@ -767,20 +833,33 @@ router.post('/clip/:jobId/catbox', apiKeyMiddleware, async (req, res) => {
   try {
     const fileBuffer = fs.readFileSync(filePath);
     const safePlatform = (job.platform || 'unknown').replace(/[^\w]/g, '_');
-    const safeUser     = (job.username || 'unknown').replace(/[^\w@.-]/g, '_');
+    const safeUser     = shortLabel(job.username || 'unknown');
     const filename     = `clip_${safePlatform}_${safeUser}_${Number(job.duration) || 0}s.mp4`;
     const boundary     = 'ClipperBoundary' + Date.now().toString(16);
     const CRLF         = '\r\n';
+
+    // Only include userhash when it is actually configured.
+    // Catbox's /user/api.php returns 412 "Not signed in!" when an empty
+    // userhash field is present — omitting it entirely triggers a guest upload.
+    const userhashPart = CATBOX_USERHASH
+      ? [
+          Buffer.from(`--${boundary}${CRLF}`),
+          Buffer.from(`Content-Disposition: form-data; name="userhash"${CRLF}`),
+          Buffer.from(CRLF),
+          Buffer.from(`${CATBOX_USERHASH}${CRLF}`),
+        ]
+      : [];
+
+    if (!CATBOX_USERHASH) {
+      console.warn('[Catbox] CATBOX_USERHASH is not set — uploading as anonymous guest');
+    }
 
     const body = Buffer.concat([
       Buffer.from(`--${boundary}${CRLF}`),
       Buffer.from(`Content-Disposition: form-data; name="reqtype"${CRLF}`),
       Buffer.from(CRLF),
       Buffer.from(`fileupload${CRLF}`),
-      Buffer.from(`--${boundary}${CRLF}`),
-      Buffer.from(`Content-Disposition: form-data; name="userhash"${CRLF}`),
-      Buffer.from(CRLF),
-      Buffer.from(`${CATBOX_USERHASH}${CRLF}`),
+      ...userhashPart,
       Buffer.from(`--${boundary}${CRLF}`),
       Buffer.from(`Content-Disposition: form-data; name="fileToUpload"; filename="${filename}"${CRLF}`),
       Buffer.from(`Content-Type: video/mp4${CRLF}`),
@@ -792,30 +871,47 @@ router.post('/clip/:jobId/catbox', apiKeyMiddleware, async (req, res) => {
 
     console.log(`[Catbox] Uploading ${filename} — ${(body.length / 1048576).toFixed(1)} MB`);
 
-    const catboxRes = await fetch('https://catbox.moe/user/api.php', {
-      method: 'POST',
-      headers: {
-        'Content-Type':   `multipart/form-data; boundary=${boundary}`,
-        'Content-Length': String(body.length),
-        'User-Agent':     process.env.USER_AGENT || 'Mozilla/5.0',
-      },
-      body,
-    });
+    // Use an AbortController so we time out cleanly rather than hanging forever
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 120_000); // 2-minute timeout
 
-    const text = (await catboxRes.text()).trim();
-    console.log(`[Catbox] Response ${catboxRes.status}: ${text}`);
+    let catboxRes;
+    try {
+      catboxRes = await fetch('https://catbox.moe/user/api.php', {
+        method: 'POST',
+        headers: {
+          'Content-Type':   `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': String(body.length),
+          'User-Agent':     process.env.USER_AGENT || 'Mozilla/5.0',
+          'Accept':         'text/plain, */*',
+        },
+        body,
+        signal: ac.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const rawText = await catboxRes.text();
+    const text    = rawText.trim();
+    console.log(`[Catbox] Response ${catboxRes.status}: ${text.slice(0, 200)}`);
 
     if (!catboxRes.ok) {
-      return res.status(502).json({ error: `Catbox HTTP ${catboxRes.status}: ${text}` });
+      // Strip HTML tags so the error message sent to the client stays concise
+      const plain = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+      return res.status(502).json({ error: `Catbox HTTP ${catboxRes.status}: ${plain}` });
     }
     if (!text.startsWith('https://')) {
-      return res.status(502).json({ error: `Unexpected Catbox response: ${text}` });
+      const plain = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+      return res.status(502).json({ error: `Unexpected Catbox response: ${plain}` });
     }
 
     res.json({ url: text });
   } catch (err) {
     console.error('[Catbox] Upload error:', err.message);
-    res.status(500).json({ error: err.message });
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    }
   }
 });
 
@@ -836,7 +932,7 @@ router.post('/clip/:jobId/quax', apiKeyMiddleware, async (req, res) => {
   try {
     const fileBuffer = fs.readFileSync(filePath);
     const safePlatform = (job.platform || 'unknown').replace(/[^\w]/g, '_');
-    const safeUser     = (job.username || 'unknown').replace(/[^\w@.-]/g, '_');
+    const safeUser     = shortLabel(job.username || 'unknown');
     const filename     = `clip_${safePlatform}_${safeUser}_${Number(job.duration) || 0}s.mp4`;
     const boundary     = 'QuaxBoundary' + Date.now().toString(16);
     const CRLF         = '\r\n';
@@ -853,21 +949,32 @@ router.post('/clip/:jobId/quax', apiKeyMiddleware, async (req, res) => {
 
     console.log(`[qu.ax] Uploading ${filename} — ${(body.length / 1048576).toFixed(1)} MB`);
 
-    const quaxRes = await fetch('https://qu.ax/upload.php', {
-      method: 'POST',
-      headers: {
-        'Content-Type':   `multipart/form-data; boundary=${boundary}`,
-        'Content-Length': String(body.length),
-        'User-Agent':     process.env.USER_AGENT || 'Mozilla/5.0',
-      },
-      body,
-    });
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 120_000);
 
-    const text = (await quaxRes.text()).trim();
+    let quaxRes;
+    try {
+      quaxRes = await fetch('https://qu.ax/upload.php', {
+        method: 'POST',
+        headers: {
+          'Content-Type':   `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': String(body.length),
+          'User-Agent':     process.env.USER_AGENT || 'Mozilla/5.0',
+        },
+        body,
+        signal: ac.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const rawText = await quaxRes.text();
+    const text    = rawText.trim();
     console.log(`[qu.ax] Response ${quaxRes.status}: ${text.slice(0, 200)}`);
 
     if (!quaxRes.ok) {
-      return res.status(502).json({ error: `qu.ax HTTP ${quaxRes.status}: ${text}` });
+      const plain = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+      return res.status(502).json({ error: `qu.ax HTTP ${quaxRes.status}: ${plain}` });
     }
 
     let url;
@@ -879,13 +986,16 @@ router.post('/clip/:jobId/quax', apiKeyMiddleware, async (req, res) => {
     }
 
     if (!url) {
-      return res.status(502).json({ error: `Unexpected qu.ax response: ${text}` });
+      const plain = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+      return res.status(502).json({ error: `Unexpected qu.ax response: ${plain}` });
     }
 
     res.json({ url });
   } catch (err) {
     console.error('[qu.ax] Upload error:', err.message);
-    res.status(500).json({ error: err.message });
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    }
   }
 });
 
