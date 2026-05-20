@@ -20,7 +20,7 @@
         <li><strong>Live Preview:</strong> Real-time stream embedding in the UI to confirm the broadcast status before triggering a capture.</li>
         <li><strong>Dynamic Quality Profiles:</strong> Targeted scaling down to <strong>Low (360p)</strong>, <strong>Medium (720p)</strong>, or up to <strong>High (1080p)</strong> resolutions.</li>
         <li><strong>Reliable Job Management:</strong> Powered by a persistent <code>better-sqlite3</code> engine running under Write-Ahead Logging (WAL) mode for fast, concurrent status tracking.</li>
-        <li><strong>Instant Distribution:</strong> Fully integrated one-click mirror uploads to <strong>Catbox</strong> and <strong>qu.ax</strong> directly from the client interface.</li>
+        <li><strong>Instant Distribution:</strong> Fully integrated one-click mirror uploads to <strong>Catbox</strong>, <strong>qu.ax</strong>, and <strong>Videy</strong> directly from the client interface.</li>
         <li><strong>Multi-Layered Security:</strong> Mandatory 32-character API key enforcement, Server-Side Request Forgery (SSRF) guards restricting stream target hosts, strict UUID validation, and an in-memory IP rate limiter.</li>
         <li><strong>Production Infrastructure:</strong> Includes turn-key automation scripts for multi-stage system deployments, Nginx reverse proxy management, Let's Encrypt SSL configuration, and custom Fail2ban brute-force protection.</li>
     </ul>
@@ -126,14 +126,19 @@ pm2 start ecosystem.config.js</code></pre>
                 <td>None</td>
             </tr>
             <tr>
+                <td><code>VIDEY_API_KEY</code></td>
+                <td>Optional Videy provider API key used to authorize remote mirror clip uploads via the dashboard interface.</td>
+                <td>None</td>
+            </tr>
+            <tr>
                 <td><code>RATE_LIMIT_WINDOW_MS</code></td>
                 <td>The time window duration configuration for the built-in core API memory-backed IP rate limiter (in milliseconds).</td>
-                <td><code>60000</code> <small>(1 min)</small></td>
+                <td><code>900000</code> <small>(15 min)</small></td>
             </tr>
             <tr>
                 <td><code>RATE_LIMIT_MAX_REQ</code></td>
                 <td>The maximum request limit threshold allowed from an individual source IP address during a rate limit window.</td>
-                <td><code>10</code></td>
+                <td><code>15</code></td>
             </tr>
             <tr>
                 <td><code>CLIP_OUTPUT_DIR</code></td>
