@@ -6,11 +6,24 @@
   let currentJobId = null;
   let catboxUploading = false;
   let quaxUploading = false;
+  let videyUploading = false;
 
-  const PLATFORM_HINTS = {
-    youtube: 'paste a full live URL',
-    twitch:  'e.g. xqc',
-    kick:    'paste a full live URL  —  kick.com/username',
+  const PLATFORM_META = {
+    youtube: {
+      label:       'YouTube full stream URL',
+      placeholder: 'https://www.youtube.com/watch?v=...',
+      hint:        'paste a full live URL',
+    },
+    twitch: {
+      label:       'Twitch channel URL or username',
+      placeholder: 'https://www.twitch.tv/username  or  username',
+      hint:        'e.g. https://www.twitch.tv/milkypuff  or  milkypuff',
+    },
+    kick: {
+      label:       'Kick username',
+      placeholder: 'kick.com/username',
+      hint:        'paste kick.com/username',
+    },
   };
 
   /* ── Elements ── */
@@ -48,6 +61,12 @@
   const quaxUrlText   = document.getElementById('quax-url-text');
   const quaxOpenLink  = document.getElementById('quax-open-link');
 
+  const videyBtn      = document.getElementById('videy-btn');
+  const videyStatus   = document.getElementById('videy-status');
+  const videyResult   = document.getElementById('videy-result');
+  const videyUrlText  = document.getElementById('videy-url-text');
+  const videyOpenLink = document.getElementById('videy-open-link');
+
   // errorBox holds the message text directly — there is no inner #error-text span
   const errorBox      = document.getElementById('error-box');
 
@@ -75,13 +94,25 @@
     durationVal.textContent = durationSlider.value + 's';
   });
 
+  const urlLabel = document.getElementById('url-label');
+
+  function applyPlatformMeta(platform) {
+    const meta = PLATFORM_META[platform];
+    if (!meta) return;
+    if (urlLabel)       urlLabel.textContent      = meta.label;
+    if (usernameInput)  usernameInput.placeholder = meta.placeholder;
+    if (platformHint)   platformHint.textContent  = meta.hint;
+  }
+
+  // Apply defaults for the initially active platform
+  applyPlatformMeta(activePlatform);
+
   chips.forEach(chip => {
     chip.addEventListener('click', () => {
       chips.forEach(c => c.classList.remove('active'));
       chip.classList.add('active');
       activePlatform = chip.dataset.platform;
-      usernameInput.placeholder = PLATFORM_HINTS[activePlatform];
-      platformHint.textContent = PLATFORM_HINTS[activePlatform];
+      applyPlatformMeta(activePlatform);
       updateStreamPreview();
     });
   });
@@ -181,6 +212,34 @@
     }
   });
 
+  videyBtn.addEventListener('click', async () => {
+    if (!currentJobId || videyUploading) return;
+    videyUploading = true;
+    try {
+      videyBtn.disabled = true;
+      videyStatus.innerHTML = '<span class="spinner"></span> Uploading to Videy...';
+
+      const res = await fetch(`/api/clipper/clip/${currentJobId}/videy`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${API_KEY}`
+        }
+      });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error || 'Videy upload failed');
+
+      videyStatus.innerHTML = '✅ Uploaded!';
+      videyUrlText.textContent = data.url;
+      videyOpenLink.href = data.url;
+      videyResult.classList.add('visible');
+    } catch (err) {
+      videyStatus.innerHTML = `❌ ${err.message}`;
+      videyBtn.disabled = false;
+      videyUploading = false;
+    }
+  });
+
   // 'reset-btn' doesn't exist in HTML. The two reset buttons are:
   //   #cancel-btn  — in the progress card
   //   #new-clip-btn — in the result card
@@ -275,6 +334,12 @@
     quaxResult.classList.remove('visible');
     quaxUrlText.textContent = '';
     quaxOpenLink.href = '#';
+    videyBtn.disabled = false;
+    videyUploading = false;
+    videyStatus.innerHTML = '';
+    videyResult.classList.remove('visible');
+    videyUrlText.textContent = '';
+    videyOpenLink.href = '#';
     captureBtn.disabled = false;
     currentJobId = null;
   }
@@ -308,7 +373,15 @@
 
     let embedUrl = '';
     if (activePlatform === 'twitch') {
-      embedUrl = `https://player.twitch.tv/?channel=${val}&parent=${window.location.hostname}&muted=true`;
+      // Accept full URL (https://www.twitch.tv/username) or bare username
+      let twitchChannel = val;
+      try {
+        const u = new URL(val);
+        if (u.hostname.includes('twitch.tv')) {
+          twitchChannel = u.pathname.replace(/^\//, '').split('/')[0];
+        }
+      } catch (_) {}
+      embedUrl = `https://player.twitch.tv/?channel=${twitchChannel}&parent=${window.location.hostname}&muted=true`;
     } else if (activePlatform === 'kick') {
       // Extract slug from full URL if pasted
       let kickSlug = val;
