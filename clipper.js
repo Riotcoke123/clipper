@@ -22,6 +22,8 @@ const KICK_CLIENT_ID     = process.env.KICK_CLIENT_ID   || '';
 const KICK_CLIENT_SECRET = process.env.KICK_CLIENT_SECRET || '';
 const YOUTUBE_API_KEY    = process.env.YOUTUBE_API_KEY  || '';
 const CATBOX_USERHASH    = process.env.CATBOX_USERHASH  || '';
+const VIDEY_API_KEY      = process.env.VIDEY_API_KEY    || '';
+const VIDEY_API_SECRET   = process.env.VIDEY_API_SECRET || '';
 const MAX_CLIP_SECONDS   = Number(process.env.MAX_CLIP_SECONDS)  || 300;
 const DEFAULT_CLIP_SECS  = Number(process.env.DEFAULT_CLIP_SECS) || 60;
 const DB_PATH            = process.env.DB_PATH || path.join(__dirname, 'clipper.db');
@@ -993,6 +995,97 @@ router.post('/clip/:jobId/quax', apiKeyMiddleware, async (req, res) => {
     res.json({ url });
   } catch (err) {
     console.error('[qu.ax] Upload error:', err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+});
+
+/**
+ * POST /api/clipper/clip/:jobId/videy
+ * Server-side proxy: uploads finished mp4 to videy.co.
+ */
+router.post('/clip/:jobId/videy', apiKeyMiddleware, async (req, res) => {
+  try { assertValidJobId(req.params.jobId); } catch (e) { return res.status(400).json({ error: e.message }); }
+  const job = jobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  const filePath = job.outputFile;
+  if (!filePath || !fs.existsSync(filePath)) {
+    return res.status(410).json({ error: 'Clip file not found on disk' });
+  }
+
+  if (!VIDEY_API_KEY || !VIDEY_API_SECRET) {
+    return res.status(500).json({ error: 'Videy credentials not configured (set VIDEY_API_KEY and VIDEY_API_SECRET in .env)' });
+  }
+
+  try {
+    const fileBuffer  = fs.readFileSync(filePath);
+    const safePlatform = (job.platform || 'unknown').replace(/[^\w]/g, '_');
+    const safeUser     = shortLabel(job.username || 'unknown');
+    const filename     = `clip_${safePlatform}_${safeUser}_${Number(job.duration) || 0}s.mp4`;
+    const boundary     = 'VideyBoundary' + Date.now().toString(16);
+    const CRLF         = '\r\n';
+
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}${CRLF}`),
+      Buffer.from(`Content-Disposition: form-data; name="file"; filename="${filename}"${CRLF}`),
+      Buffer.from(`Content-Type: video/mp4${CRLF}`),
+      Buffer.from(CRLF),
+      fileBuffer,
+      Buffer.from(CRLF),
+      Buffer.from(`--${boundary}--${CRLF}`),
+    ]);
+
+    console.log(`[Videy] Uploading ${filename} — ${(body.length / 1048576).toFixed(1)} MB`);
+
+    const ac    = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 180_000); // 3-minute timeout
+
+    let videyRes;
+    try {
+      videyRes = await fetch('https://videy.co/api/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type':   `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': String(body.length),
+          'User-Agent':     process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+          'x-api-key':      VIDEY_API_KEY,
+          'x-api-secret':   VIDEY_API_SECRET,
+        },
+        body,
+        signal: ac.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const rawText = await videyRes.text();
+    const text    = rawText.trim();
+    console.log(`[Videy] Response ${videyRes.status}: ${text.slice(0, 200)}`);
+
+    if (!videyRes.ok) {
+      const plain = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+      return res.status(502).json({ error: `Videy HTTP ${videyRes.status}: ${plain}` });
+    }
+
+    // Videy returns JSON: { id: "abc123", ... }
+    let url;
+    try {
+      const json = JSON.parse(text);
+      if (json.id) url = `https://videy.co/v/${json.id}`;
+    } catch (_) {
+      url = text.startsWith('https://') ? text : null;
+    }
+
+    if (!url) {
+      const plain = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+      return res.status(502).json({ error: `Unexpected Videy response: ${plain}` });
+    }
+
+    res.json({ url });
+  } catch (err) {
+    console.error('[Videy] Upload error:', err.message);
     if (!res.headersSent) {
       res.status(500).json({ error: err.message });
     }
