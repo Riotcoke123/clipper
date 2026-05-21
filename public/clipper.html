@@ -9,7 +9,7 @@
 <meta name="description" content="Stream Clipper - Clip anything from YouTube, Twitch, and Kick.">
 
 <!-- SEO -->
-<meta name="keywords" content="stream clipper, clip YouTube, clip Twitch, clip Kick, live stream recorder, stream highlights, video clipper">
+<meta name="keywords" content="stream clipper, clip YouTube, clip Twitch, clip Kick, live stream recorder, stream highlights, video clipper, ip2, ip2 network, ip2 always wins, ip2 online, ip2 wiki, ip2.network, cx, irl streaming, irl clips, iceposeidon, iceposeidon network, ice poseidon, ip2 clips, ip2 stream, ip2 live, ip2 highlights, cx network, irl streamer clips">
 <meta name="author" content="Stream Clipper">
 <meta name="robots" content="index, follow">
 <link rel="canonical" href="https://clipper.iceposeidon.network/">
@@ -41,8 +41,6 @@
 <link rel="stylesheet" href="clipper.css">
 </head>
 <body>
-
-  
 
 <!--
   AD CONTAINMENT: The ad is wrapped in a div with position:relative and
@@ -84,18 +82,44 @@
         <span class="dot"></span> Kick
       </div>
     </div>
+<!-- YouTube input -->
+<div class="field" id="field-youtube">
+  <label for="username-input-youtube" id="url-label-youtube">YouTube full stream URL</label>
+  <input
+    type="text"
+    id="username-input-youtube"
+    autocomplete="off"
+    spellcheck="false"
+    placeholder="https://www.youtube.com/watch?v=..."
+  />
+  <div class="platform-hint">paste a full live URL</div>
+</div>
 
-    <div class="field">
-      <label for="username-input" id="url-label">YouTube full stream URL</label>
-      <input
-        type="text"
-        id="username-input"
-        autocomplete="off"
-        spellcheck="false"
-        placeholder="https://www.youtube.com/watch?v=..."
-      />
-      <div class="platform-hint" id="platform-hint">paste a full live URL</div>
-    </div>
+<!-- Twitch input -->
+<div class="field" id="field-twitch" style="display:none">
+  <label for="username-input-twitch">Twitch channel URL or username</label>
+  <input
+    type="text"
+    id="username-input-twitch"
+    autocomplete="off"
+    spellcheck="false"
+    placeholder="https://www.twitch.tv/username  or  username"
+  />
+  <div class="platform-hint">e.g. https://www.twitch.tv/milkypuff  or  milkypuff</div>
+</div>
+
+<!-- Kick input -->
+<div class="field" id="field-kick" style="display:none">
+  <label for="username-input-kick">Kick username</label>
+  <input
+    type="text"
+    id="username-input-kick"
+    autocomplete="off"
+    spellcheck="false"
+    placeholder="https://www.kick.com/username  or  username"
+  />
+  <div class="platform-hint">paste https://www.kick.com/myrongainesx or myrongainesx</div>
+</div>
 
     <!-- ── Stream preview ── -->
     <div class="stream-preview-wrap" id="stream-preview-wrap">
@@ -241,50 +265,12 @@
   <ins class="eas6a97888e2" data-zoneid="5925362"></ins>
   <script>(AdProvider = window.AdProvider || []).push({"serve": {}});</script>
 </div>
+
+<!-- script.js handles all platform chip logic and applyPlatformMeta internally.
+     The duplicate inline script that was here has been removed — it was causing
+     a race condition where DOMContentLoaded re-ran applyPlatformMeta after
+     script.js had already set up its own chip listeners, sometimes overwriting
+     the active state. -->
 <script src="script.js" defer></script>
-<script>
-  // Platform-aware label / hint / placeholder
-  const platformMeta = {
-    youtube: {
-      label:       'YouTube full stream URL',
-      placeholder: 'https://www.youtube.com/watch?v=...',
-      hint:        'paste a full live URL',
-    },
-    twitch: {
-      label:       'Twitch channel URL or username',
-      placeholder: 'https://www.twitch.tv/username  or  username',
-      hint:        'e.g. https://www.twitch.tv/policechasenetwork  or  policechasenetwork',
-    },
-    kick: {
-      label:       'Kick username',
-      placeholder: 'https://www.kick.com/username   or  username',
-      hint:        'paste https://www.kick.com/myrongainesx or myrongainesx',
-    },
-  };
-
-  function applyPlatformMeta(platform) {
-    const meta = platformMeta[platform];
-    if (!meta) return;
-    const label = document.getElementById('url-label');
-    const input = document.getElementById('username-input');
-    const hint  = document.getElementById('platform-hint');
-    if (label) label.textContent        = meta.label;
-    if (input) input.placeholder        = meta.placeholder;
-    if (hint)  hint.textContent         = meta.hint;
-  }
-
-  document.addEventListener('DOMContentLoaded', function () {
-    // Apply on chip click (works alongside script.js logic)
-    document.querySelectorAll('.platform-chip').forEach(function (chip) {
-      chip.addEventListener('click', function () {
-        applyPlatformMeta(chip.dataset.platform);
-      });
-    });
-
-    // Apply for whichever chip starts active
-    const active = document.querySelector('.platform-chip.active');
-    if (active) applyPlatformMeta(active.dataset.platform);
-  });
-</script>
 </body>
 </html>
