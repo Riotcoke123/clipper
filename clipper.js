@@ -108,6 +108,65 @@ try {
   db.exec(`ALTER TABLE jobs ADD COLUMN startOffset INTEGER NOT NULL DEFAULT 0`);
 } catch (_) { /* column already exists — ignore */ }
 
+/* ── Clipped-users registry ───────────────────────────────── */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS clipped_users (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    username         TEXT    NOT NULL,
+    platform         TEXT    NOT NULL,
+    clip_count       INTEGER NOT NULL DEFAULT 1,
+    total_duration   INTEGER NOT NULL DEFAULT 0,
+    first_clipped_at TEXT    NOT NULL,
+    last_clipped_at  TEXT    NOT NULL,
+    UNIQUE (username, platform)
+  )
+`);
+
+/* ── Per-platform aggregate stats ────────────────────────── */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS platform_stats (
+    platform         TEXT PRIMARY KEY,
+    clip_count       INTEGER NOT NULL DEFAULT 0,
+    total_duration   INTEGER NOT NULL DEFAULT 0,
+    unique_users     INTEGER NOT NULL DEFAULT 0,
+    last_activity_at TEXT    NOT NULL
+  )
+`);
+
+/* ── Prepared statements for user/platform tracking ─────── */
+const stmtUpsertUser = db.prepare(`
+  INSERT INTO clipped_users (username, platform, clip_count, total_duration, first_clipped_at, last_clipped_at)
+  VALUES (@username, @platform, 1, @duration, @now, @now)
+  ON CONFLICT(username, platform) DO UPDATE SET
+    clip_count     = clip_count + 1,
+    total_duration = total_duration + @duration,
+    last_clipped_at = @now
+`);
+
+const stmtUpsertPlatform = db.prepare(`
+  INSERT INTO platform_stats (platform, clip_count, total_duration, unique_users, last_activity_at)
+  VALUES (@platform, 1, @duration, 1, @now)
+  ON CONFLICT(platform) DO UPDATE SET
+    clip_count       = clip_count + 1,
+    total_duration   = total_duration + @duration,
+    unique_users     = (SELECT COUNT(DISTINCT username) FROM clipped_users WHERE platform = @platform),
+    last_activity_at = @now
+`);
+
+const stmtAllUsers     = db.prepare('SELECT * FROM clipped_users ORDER BY last_clipped_at DESC');
+const stmtUsersByPlat  = db.prepare('SELECT * FROM clipped_users WHERE platform = ? ORDER BY last_clipped_at DESC');
+const stmtAllPlatStats = db.prepare('SELECT * FROM platform_stats ORDER BY clip_count DESC');
+
+/**
+ * Record a successfully completed clip into the users + platform registries.
+ * Called once a job transitions to 'ready'.
+ */
+const recordClipCompletion = db.transaction((username, platform, duration) => {
+  const now = new Date().toISOString();
+  stmtUpsertUser.run({ username, platform, duration, now });
+  stmtUpsertPlatform.run({ platform, duration, now });
+});
+
 // Prepared statements
 const stmtInsert = db.prepare(`
   INSERT INTO jobs (id, platform, username, duration, status, progress, outputFile, downloadUrl, error, createdAt, startOffset)
@@ -385,10 +444,6 @@ async function resolveYouTube(username) {
 }
 
 /**
- * Twitch — yt-dlp handles OAuth-less public stream extraction perfectly.
- * We never accept a raw URL from the caller to prevent SSRF.
- */
-/**
  * Twitch — pre-resolve to a direct HLS URL so captureClip can use
  * ffmpeg -t (live-edge clipping) instead of yt-dlp --download-sections.
  */
@@ -522,7 +577,7 @@ async function captureClip(jobId, stream, duration, quality = 'medium', startOff
       }
       inputOptions.push('-t', String(duration));
 
-      // Track last written progress so we never go backwards (Bug 2 fix)
+      // Track last written progress so we never go backwards
       let lastPct = 5;
 
       ffmpeg(stream.url)
@@ -597,7 +652,7 @@ async function captureClip(jobId, stream, duration, quality = 'medium', startOff
 
     const proc = spawn('yt-dlp', args);
     let stderr = '';
-    let lastDlPct = 2; // never let progress go backwards (Bug 2 fix)
+    let lastDlPct = 2; // never let progress go backwards
 
     proc.stdout.on('data', data => {
       const out = data.toString();
@@ -627,7 +682,7 @@ async function captureClip(jobId, stream, duration, quality = 'medium', startOff
                      : quality === 'high' ? '1280:-2'
                      : '854:-2';
 
-    let lastEncPct = 72; // never go backwards during encode (Bug 2 fix)
+    let lastEncPct = 72; // never go backwards during encode
 
     ffmpeg(tempFile)
       .videoCodec('libx264')
@@ -725,6 +780,8 @@ function startClip({ platform, username, duration, quality = 'medium' }) {
       const outFile = await captureClip(job.id, stream, secs, normalQuality, startOffset);
 
       updateJob(job.id, { status: 'ready', progress: 100, outputFile: outFile });
+      // Persist user + platform stats for completed clips
+      recordClipCompletion(safeUser, normalPlatform, secs);
       console.log(`[Clipper] Job ${job.id} ready → ${outFile}`);
     } catch (err) {
       console.error(`[Clipper] Job ${job.id} failed:`, err.message);
@@ -742,7 +799,7 @@ function startClip({ platform, username, duration, quality = 'medium' }) {
    ============================================================ */
 const router = express.Router();
 
-// Apply rate limiting and API-key guard to all routes on this router
+// Apply rate limiting to all routes on this router
 router.use(rateLimitMiddleware);
 
 /**
@@ -1108,6 +1165,51 @@ router.delete('/clip/:jobId', apiKeyMiddleware, (req, res) => {
 });
 
 /**
+ * GET /api/clipper/users
+ * List all users that have been clipped, optionally filtered by platform.
+ * Query params:
+ *   ?platform=youtube|twitch|kick  — filter to one platform
+ *
+ * Response shape:
+ * {
+ *   users: [
+ *     { id, username, platform, clip_count, total_duration,
+ *       first_clipped_at, last_clipped_at }
+ *   ],
+ *   total: <number>
+ * }
+ */
+router.get('/users', (req, res) => {
+  const { platform } = req.query;
+  let rows;
+  if (platform) {
+    if (!VALID_PLATFORMS.includes(platform.toLowerCase())) {
+      return res.status(400).json({ error: `Invalid platform. Valid: ${VALID_PLATFORMS.join(', ')}` });
+    }
+    rows = stmtUsersByPlat.all(platform.toLowerCase());
+  } else {
+    rows = stmtAllUsers.all();
+  }
+  res.json({ users: rows, total: rows.length });
+});
+
+/**
+ * GET /api/clipper/stats
+ * Aggregated clip statistics per platform.
+ *
+ * Response shape:
+ * {
+ *   platforms: [
+ *     { platform, clip_count, total_duration, unique_users, last_activity_at }
+ *   ]
+ * }
+ */
+router.get('/stats', (req, res) => {
+  const platforms = stmtAllPlatStats.all();
+  res.json({ platforms });
+});
+
+/**
  * GET /api/clipper/jobs
  * List all jobs (most recent first, max 100) — internal paths stripped.
  */
@@ -1130,9 +1232,22 @@ router.get('/platforms', (_req, res) => {
   });
 });
 
+/**
+ * GET /api/clipper/config
+ * Returns config info for the frontend, including the API key so the
+ * frontend can authenticate its POST requests.
+ *
+ * FIX: apiKey was previously omitted, causing script.js init() to load
+ * an empty string, making every POST to /clip return 401 Unauthorized.
+ */
 router.get('/config', (req, res) => {
   res.json({
-    apiKey: process.env.CLIPPER_API_KEY
+    apiKey:            API_KEY,           // ← THE FIX: frontend needs this to auth POSTs
+    maxClipSeconds:    MAX_CLIP_SECONDS,
+    defaultClipSecs:   DEFAULT_CLIP_SECS,
+    maxConcurrentJobs: MAX_CONCURRENT_JOBS,
+    platforms:         VALID_PLATFORMS,
+    qualities:         VALID_QUALITIES,
   });
 });
 
