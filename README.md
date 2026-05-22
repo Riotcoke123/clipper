@@ -1,5 +1,5 @@
 <header>
-    <h1>Stream Clipper <small>v1.0</small></h1>
+    <h1>Stream Clipper <small>v1.3</small></h1>
     <p>High-performance automated highlight capture for live broadcasts.</p>
 </header>
 
