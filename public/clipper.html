@@ -42,18 +42,7 @@
 </head>
 <body>
 
-<!--
-  AD CONTAINMENT: The ad is wrapped in a div with position:relative and
-  overflow:hidden. This prevents the ad network from injecting a
-  position:fixed full-screen overlay (a common mobile ad tactic that
-  captures all touch events and makes the page appear frozen).
--->
-<div class="ad-container">
-  <script async type="application/javascript" src="https://a.magsrv.com/ad-provider.js"></script>
-  <ins class="eas6a97888e2" data-zoneid="5923164"></ins>
-  <script>(AdProvider = window.AdProvider || []).push({"serve": {}});</script>
-</div>
-<div class="page-wrap"><br><br>
+
 
   <header>
     <div class="logo-mark">
@@ -259,18 +248,7 @@
     <a href="mailto:riotcokemedia@iceposeidon.network">riotcokemedia@iceposeidon.network</a> ·
     <a href="https://iceposeidon.network/" target="_blank" rel="noopener noreferrer">ip2 streamer list</a>
   </footer>
-</div><br><br>
-<div class="ad-container">
-  <script async type="application/javascript" src="https://a.magsrv.com/ad-provider.js"></script>
-  <ins class="eas6a97888e2" data-zoneid="5925362"></ins>
-  <script>(AdProvider = window.AdProvider || []).push({"serve": {}});</script>
 </div>
-
-<!-- script.js handles all platform chip logic and applyPlatformMeta internally.
-     The duplicate inline script that was here has been removed — it was causing
-     a race condition where DOMContentLoaded re-ran applyPlatformMeta after
-     script.js had already set up its own chip listeners, sometimes overwriting
-     the active state. -->
 <script src="script.js" defer></script>
 </body>
 </html>
