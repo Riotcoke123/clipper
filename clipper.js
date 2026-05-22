@@ -40,12 +40,26 @@ if (!API_KEY || API_KEY.length < 32) {
   process.exit(1);
 }
 
+// Separate browser-facing key so the real CLIPPER_API_KEY (admin-level) is
+// never sent to the browser.  Set CLIPPER_BROWSER_KEY in your .env to a
+// different value; if omitted it falls back to CLIPPER_API_KEY so existing
+// deployments keep working without any changes.
+const BROWSER_KEY = process.env.CLIPPER_BROWSER_KEY || API_KEY;
+
+// How long to keep completed clip files on disk before auto-deleting.
+// Keeps disk usage bounded with multiple users.  Override with CLIP_MAX_AGE_HOURS.
+const CLIP_MAX_AGE_MS    = (Number(process.env.CLIP_MAX_AGE_HOURS) || 2) * 3_600_000;
+
 // Maximum simultaneous capture jobs (yt-dlp + ffmpeg processes).
 const MAX_CONCURRENT_JOBS = Number(process.env.MAX_CONCURRENT_JOBS) || 5;
 
 // Simple in-memory rate limiter: max requests per window per IP.
 const RATE_LIMIT_WINDOW_MS  = Number(process.env.RATE_LIMIT_WINDOW_MS)  || 60_000; // 1 min
-const RATE_LIMIT_MAX_REQ    = Number(process.env.RATE_LIMIT_MAX_REQ)    || 10;
+// POST /clip: how many new clip jobs each IP can start per window.
+const RATE_LIMIT_MAX_CLIPS  = Number(process.env.RATE_LIMIT_MAX_CLIPS)  || 5;
+// GET poll/status endpoints: much higher ceiling so polling every 2 s never
+// triggers a 429 even with 5 simultaneous users on the same IP.
+const RATE_LIMIT_MAX_POLLS  = Number(process.env.RATE_LIMIT_MAX_POLLS)  || 300;
 
 // Allowed HTTPS hostnames for user-supplied stream URLs (SSRF guard).
 // Add more if you need to support additional platforms.
@@ -240,9 +254,33 @@ function updateJob(id, patch) {
   });
 }
 
-/* ============================================================
-   SECURITY HELPERS
-   ============================================================ */
+/* ── Auto-cleanup of old clips ────────────────────────────── */
+/**
+ * Delete clips (file + DB row) older than CLIP_MAX_AGE_HOURS.
+ * Runs at startup and every 30 minutes so disk stays bounded
+ * when multiple users are clipping throughout the day.
+ */
+function cleanupOldClips() {
+  const cutoff = new Date(Date.now() - CLIP_MAX_AGE_MS).toISOString();
+  const stale  = db.prepare(
+    "SELECT id, outputFile FROM jobs WHERE createdAt < ? AND status IN ('ready','error','pending')"
+  ).all(cutoff);
+
+  for (const row of stale) {
+    if (row.outputFile) fs.unlink(row.outputFile, () => {});
+    // Remove any temp raw file left by an interrupted job
+    fs.unlink(path.join(CLIP_TEMP_DIR, `raw_${row.id}.mp4`), () => {});
+    stmtDelete.run(row.id);
+  }
+
+  if (stale.length > 0) {
+    console.log(`[Clipper] Auto-cleanup: removed ${stale.length} stale clip(s) (>= ${process.env.CLIP_MAX_AGE_HOURS || 2}h old)`);
+  }
+}
+
+// Run immediately on startup, then every 30 minutes
+cleanupOldClips();
+setInterval(cleanupOldClips, 30 * 60_000).unref();
 
 /**
  * Sanitise a channel handle / username:
@@ -322,34 +360,50 @@ function publicJob(job) {
   return rest;
 }
 
-/* ── Simple in-memory rate limiter ────────────────────────── */
-const _rateBuckets = new Map(); // ip → { count, resetAt }
+/* ── Simple in-memory rate limiter (per-IP, configurable ceiling) ── */
+const _rateBuckets = new Map(); // `${ip}:${key}` → { count, resetAt }
 
-function rateLimitMiddleware(req, res, next) {
-  const ip  = req.ip || req.socket?.remoteAddress || 'unknown';
-  const now = Date.now();
-  let bucket = _rateBuckets.get(ip);
-  if (!bucket || now > bucket.resetAt) {
-    bucket = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
-    _rateBuckets.set(ip, bucket);
-  }
-  bucket.count++;
-  if (bucket.count > RATE_LIMIT_MAX_REQ) {
-    res.setHeader('Retry-After', Math.ceil((bucket.resetAt - now) / 1000));
-    return res.status(429).json({ error: 'Too many requests — slow down' });
-  }
-  next();
+/**
+ * Build a rate-limit middleware with a specific ceiling.
+ * Using a key lets clip-creation and poll requests share the same bucket
+ * map but maintain independent counters per IP.
+ */
+function makeRateLimiter(maxReq, bucketKey = 'default') {
+  return function rateLimitMiddleware(req, res, next) {
+    const ip    = req.ip || req.socket?.remoteAddress || 'unknown';
+    const bkey  = `${ip}:${bucketKey}`;
+    const now   = Date.now();
+    let bucket  = _rateBuckets.get(bkey);
+    if (!bucket || now > bucket.resetAt) {
+      bucket = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+      _rateBuckets.set(bkey, bucket);
+    }
+    bucket.count++;
+    if (bucket.count > maxReq) {
+      res.setHeader('Retry-After', Math.ceil((bucket.resetAt - now) / 1000));
+      return res.status(429).json({ error: 'Too many requests — slow down' });
+    }
+    next();
+  };
 }
+
+// Strict: limits how many new clip jobs an IP can start per minute.
+const clipCreationLimiter = makeRateLimiter(RATE_LIMIT_MAX_CLIPS, 'clip');
+// Loose: high enough that polling every 2 s across 5 active jobs never hits it.
+const pollLimiter         = makeRateLimiter(RATE_LIMIT_MAX_POLLS, 'poll');
+
 // Prune stale buckets periodically to avoid memory growth
 setInterval(() => {
   const now = Date.now();
-  for (const [ip, b] of _rateBuckets) { if (now > b.resetAt) _rateBuckets.delete(ip); }
+  for (const [k, b] of _rateBuckets) { if (now > b.resetAt) _rateBuckets.delete(k); }
 }, 300_000).unref();
 
 /* ── API-key guard (always enforced) ─────────────────────── */
 function apiKeyMiddleware(req, res, next) {
   const provided = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
-  if (!provided || provided !== API_KEY) {
+  // Accept either the master API_KEY (admin/server use) or the browser-facing
+  // BROWSER_KEY so browsers using the config-endpoint key can call all routes.
+  if (!provided || (provided !== API_KEY && provided !== BROWSER_KEY)) {
     return res.status(401).json({ error: 'Unauthorized — valid API key required' });
   }
   next();
@@ -799,15 +853,15 @@ function startClip({ platform, username, duration, quality = 'medium' }) {
    ============================================================ */
 const router = express.Router();
 
-// Apply rate limiting to all routes on this router
-router.use(rateLimitMiddleware);
+// Note: rate limiting is applied per-route below (clip creation vs. polling)
+// so that status-poll requests (every 2 s) never trigger a 429.
 
 /**
  * POST /api/clipper/clip
  * Body: { platform, username, duration?, quality? }
  * Returns: { jobId, status, message }
  */
-router.post('/clip', apiKeyMiddleware, (req, res) => {
+router.post('/clip', clipCreationLimiter, apiKeyMiddleware, (req, res) => {
   try {
     const { platform, username, duration, quality } = req.body || {};
 
@@ -838,7 +892,7 @@ router.post('/clip', apiKeyMiddleware, (req, res) => {
  * GET /api/clipper/clip/:jobId
  * Returns the current job state (internal paths stripped).
  */
-router.get('/clip/:jobId', (req, res) => {
+router.get('/clip/:jobId', pollLimiter, (req, res) => {
   try { assertValidJobId(req.params.jobId); } catch (e) { return res.status(400).json({ error: e.message }); }
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -1242,7 +1296,11 @@ router.get('/platforms', (_req, res) => {
  */
 router.get('/config', (req, res) => {
   res.json({
-    apiKey:            API_KEY,           // ← THE FIX: frontend needs this to auth POSTs
+    // BROWSER_KEY is a separate .env value (CLIPPER_BROWSER_KEY).
+    // If not set it falls back to CLIPPER_API_KEY, matching old behaviour.
+    // Using a distinct key means a leaked browser key can be rotated
+    // without touching the admin/server key.
+    apiKey:            BROWSER_KEY,
     maxClipSeconds:    MAX_CLIP_SECONDS,
     defaultClipSecs:   DEFAULT_CLIP_SECS,
     maxConcurrentJobs: MAX_CONCURRENT_JOBS,
