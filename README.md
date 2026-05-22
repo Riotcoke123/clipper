@@ -1,12 +1,12 @@
 <header>
-    <h1>Stream Clipper <small>v1.1</small></h1>
+    <h1>Stream Clipper <small>v1.0</small></h1>
     <p>High-performance automated highlight capture for live broadcasts.</p>
 </header>
 
 <section>
     <h2>Overview</h2>
     <p>
-        Stream Clipper is a production-ready utility designed to capture and process highlights from live broadcasts. By leveraging <code>yt-dlp</code> for stream manifest resolution and <code>FFmpeg</code> for segmented recording, it provides a seamless way to generate high-quality <strong>.mp4</strong> clips from active live streams. 
+        Stream Clipper is a production-ready utility designed to capture and process highlights from live broadcasts. By leveraging <code>yt-dlp</code> for stream manifest resolution and <code>FFmpeg</code> for segmented recording, it provides a seamless way to generate high-quality <strong>.mp4</strong> clips from active live streams.
     </p>
     <p>
         The application avoids unreliable VOD-based scraping options by pre-resolving broadcasts to direct HLS manifest URLs. It then captures video directly from the stream's live edge or oldest available DVR frames, utilizing highly resilient reconnection parameters designed for modern live infrastructure.
@@ -21,7 +21,7 @@
         <li><strong>Dynamic Quality Profiles:</strong> Targeted scaling down to <strong>Low (360p)</strong>, <strong>Medium (720p)</strong>, or up to <strong>High (1080p)</strong> resolutions.</li>
         <li><strong>Reliable Job Management:</strong> Powered by a persistent <code>better-sqlite3</code> engine running under Write-Ahead Logging (WAL) mode for fast, concurrent status tracking.</li>
         <li><strong>Instant Distribution:</strong> Fully integrated one-click mirror uploads to <strong>Catbox</strong>, <strong>qu.ax</strong>, and <strong>Videy</strong> directly from the client interface.</li>
-        <li><strong>Multi-Layered Security:</strong> Mandatory 32-character API key enforcement, Server-Side Request Forgery (SSRF) guards restricting stream target hosts, strict UUID validation, and an in-memory IP rate limiter.</li>
+        <li><strong>Multi-Layered Security:</strong> Mandatory 32-character API key enforcement split into admin and browser tiers, Server-Side Request Forgery (SSRF) guards restricting stream target hosts, strict UUID validation, and an in-memory IP rate limiter segmented by route.</li>
         <li><strong>Production Infrastructure:</strong> Includes turn-key automation scripts for multi-stage system deployments, Nginx reverse proxy management, Let's Encrypt SSL configuration, and custom Fail2ban brute-force protection.</li>
     </ul>
 </section>
@@ -34,12 +34,12 @@
 ├── harden.sh             # Server security setup deploying custom Fail2ban jail blocks and UFW rules
 ├── public/               # Web client directory containing frontend application code
 │   ├── clipper.html      # Main operational web dashboard template
-│   ├── clipper.css       # Fully responsive grid custom layouts with dark mode variables
+│   ├── clipper.css       # Fully responsive grid custom layouts with dark mode variables [cite: 2]
 │   ├── script.js         # Client-side validation, iframe embeds, and asynchronous polling logic
 │   └── clips/            # Production storage directory for completed .mp4 clips
 ├── logs/                 # System log destination managing active PM2 standard out and error streams
 ├── temp/                 # Temporary working directory for staging incoming stream fragments
-└── .env                  # Critical environment variable configuration file</code></pre>
+└── .env                  # Critical environment variable configuration file [cite: 1]</code></pre>
 </section>
 
 <section>
@@ -52,26 +52,6 @@ bash deploy.sh
 
 # 2. Lock down open ports and establish automated brute-force threat bans
 bash harden.sh</code></pre>
-    <h3>Manual Configuration</h3>
-    <p>If configuring your local or cloud platform step by step, handle the setup manually via terminal package managers:</p>
-<pre><code># Install base encoding and persistent storage runtimes
-sudo apt-get update
-sudo apt-get install -y ffmpeg sqlite3 build-essential
-
-# Pull down the latest standalone executable release of yt-dlp
-sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
-sudo chmod a+rx /usr/local/bin/yt-dlp
-
-# Clone repository, navigate inside, and construct dependency trees
-git clone https://github.com/Riotcoke123/clipper.git
-cd clipper
-npm install
-
-# Initialize your required variables within an environment file
-cp .env.example .env
-
-# Fire up background management threads via PM2
-pm2 start ecosystem.config.js</code></pre>
 </section>
 
 <section>
@@ -79,7 +59,7 @@ pm2 start ecosystem.config.js</code></pre>
     <p>
         The application <strong>will refuse to start</strong> if a <code>CLIPPER_API_KEY</code> containing at least 32 characters is missing from the environment. You can generate a cryptographically secure 32-character hex key string by running:
     </p>
-<pre><code>node -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))"</code></pre>
+<pre><code>node -e "require('crypto').randomBytes(32).toString('hex')|0 && process.stdout.write(require('crypto').randomBytes(32).toString('hex'))"</code></pre>
     <p>Configure the following variables within your local <code>.env</code> file:</p>
     <table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; margin-top: 10px;">
         <thead>
@@ -92,8 +72,13 @@ pm2 start ecosystem.config.js</code></pre>
         <tbody>
             <tr>
                 <td><code>CLIPPER_API_KEY</code></td>
-                <td><strong>Required.</strong> Security authentication credential for modifying, deleting, or initiating encoding actions.</td>
+                <td><strong>Required.</strong> Security authentication credential for server/admin mutating requests. Must be at least 32 characters.</td>
                 <td>None</td>
+            </tr>
+            <tr>
+                <td><code>CLIPPER_BROWSER_KEY</code></td>
+                <td>Separate browser-facing key provided to the frontend payload. Falls back to <code>CLIPPER_API_KEY</code> if omitted.</td>
+                <td><code>CLIPPER_API_KEY</code></td>
             </tr>
             <tr>
                 <td><code>MAX_CLIP_SECONDS</code></td>
@@ -111,6 +96,11 @@ pm2 start ecosystem.config.js</code></pre>
                 <td><code>5</code></td>
             </tr>
             <tr>
+                <td><code>CLIP_MAX_AGE_HOURS</code></td>
+                <td>How long to keep completed clip files on disk before auto-deleting them to maintain bounded disk usage.</td>
+                <td><code>2</code></td>
+            </tr>
+            <tr>
                 <td><code>DB_PATH</code></td>
                 <td>The relative or absolute filesystem directory path mapped to host the tracking SQLite database file.</td>
                 <td><code>./clipper.db</code></td>
@@ -126,19 +116,24 @@ pm2 start ecosystem.config.js</code></pre>
                 <td>None</td>
             </tr>
             <tr>
-                <td><code>VIDEY_API_KEY</code></td>
-                <td>Optional Videy provider API key used to authorize remote mirror clip uploads via the dashboard interface.</td>
+                <td><code>VIDEY_API_KEY</code><br><code>VIDEY_API_SECRET</code></td>
+                <td>Videy provider API credentials required to authorize remote mirror clip uploads to videy.co.</td>
                 <td>None</td>
             </tr>
             <tr>
                 <td><code>RATE_LIMIT_WINDOW_MS</code></td>
-                <td>The time window duration configuration for the built-in core API memory-backed IP rate limiter (in milliseconds).</td>
-                <td><code>900000</code> <small>(15 min)</small></td>
+                <td>The time window duration for the built-in core API memory-backed IP rate limiter (in milliseconds).</td>
+                <td><code>60000</code> <small>(1 min)</small></td>
             </tr>
             <tr>
-                <td><code>RATE_LIMIT_MAX_REQ</code></td>
-                <td>The maximum request limit threshold allowed from an individual source IP address during a rate limit window.</td>
-                <td><code>15</code></td>
+                <td><code>RATE_LIMIT_MAX_CLIPS</code></td>
+                <td>The maximum number of new clip creation jobs an IP can start per rate limit window.</td>
+                <td><code>5</code></td>
+            </tr>
+            <tr>
+                <td><code>RATE_LIMIT_MAX_POLLS</code></td>
+                <td>The maximum number of status polling requests an IP can make per rate limit window.</td>
+                <td><code>300</code></td>
             </tr>
             <tr>
                 <td><code>CLIP_OUTPUT_DIR</code></td>
