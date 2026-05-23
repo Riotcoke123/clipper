@@ -19,8 +19,11 @@ const CLIP_OUTPUT_DIR    = process.env.CLIP_OUTPUT_DIR  || path.join(__dirname, 
 const CLIP_TEMP_DIR      = process.env.CLIP_TEMP_DIR    || path.join(__dirname, 'temp');
 const KICK_API_BASE      = process.env.KICK_API_BASE    || 'https://api.kick.com';
 const KICK_AUTH_BASE     = process.env.KICK_AUTH_BASE   || 'https://id.kick.com';
+const KICK_WEB_BASE      = process.env.KICK_WEB_BASE    || 'https://kick.com';
 const KICK_CLIENT_ID     = process.env.KICK_CLIENT_ID   || '';
 const KICK_CLIENT_SECRET = process.env.KICK_CLIENT_SECRET || '';
+const TWITCH_WEB_BASE    = process.env.TWITCH_WEB_BASE  || 'https://www.twitch.tv';
+const YOUTUBE_API_BASE   = process.env.YOUTUBE_API_BASE || 'https://www.googleapis.com/youtube/v3';
 const YOUTUBE_API_KEY    = process.env.YOUTUBE_API_KEY  || '';
 const CATBOX_USERHASH    = process.env.CATBOX_USERHASH  || '';
 const VIDEY_API_KEY      = process.env.VIDEY_API_KEY    || '';
@@ -28,6 +31,9 @@ const VIDEY_API_SECRET   = process.env.VIDEY_API_SECRET || '';
 const MAX_CLIP_SECONDS   = Number(process.env.MAX_CLIP_SECONDS)  || 300;
 const DEFAULT_CLIP_SECS  = Number(process.env.DEFAULT_CLIP_SECS) || 60;
 const DB_PATH            = process.env.DB_PATH || path.join(__dirname, 'clipper.db');
+const FFMPEG_THREADS     = Number(process.env.FFMPEG_THREADS)         || 0; // 0 = ffmpeg auto
+const YTDLP_CONCURRENT_FRAGS = Number(process.env.YTDLP_CONCURRENT_FRAGS) || 1;
+const USER_AGENT         = process.env.USER_AGENT || '';
 
 /* ── Security ─────────────────────────────────────────────── */
 // Set CLIPPER_API_KEY in your environment to require an Authorization header
@@ -76,7 +82,7 @@ setInterval(() => {
 
 // How long to keep completed clip files on disk before auto-deleting.
 // Keeps disk usage bounded with multiple users.  Override with CLIP_MAX_AGE_HOURS.
-const CLIP_MAX_AGE_MS    = (Number(process.env.CLIP_MAX_AGE_HOURS) || 2) * 3_600_000;
+const CLIP_MAX_AGE_MS    = (Number(process.env.CLIP_MAX_AGE_HOURS) || 1) * 3_600_000;
 
 // Maximum simultaneous capture jobs (yt-dlp + ffmpeg processes).
 const MAX_CONCURRENT_JOBS = Number(process.env.MAX_CONCURRENT_JOBS) || 5;
@@ -156,6 +162,7 @@ db.exec(`
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     username         TEXT    NOT NULL,
     platform         TEXT    NOT NULL,
+    url              TEXT,
     clip_count       INTEGER NOT NULL DEFAULT 1,
     total_duration   INTEGER NOT NULL DEFAULT 0,
     first_clipped_at TEXT    NOT NULL,
@@ -163,6 +170,11 @@ db.exec(`
     UNIQUE (username, platform)
   )
 `);
+
+// Add url column to existing DBs that pre-date this migration
+try {
+  db.exec(`ALTER TABLE clipped_users ADD COLUMN url TEXT`);
+} catch (_) { /* column already exists — ignore */ }
 
 /* ── Per-platform aggregate stats ────────────────────────── */
 db.exec(`
@@ -177,11 +189,12 @@ db.exec(`
 
 /* ── Prepared statements for user/platform tracking ─────── */
 const stmtUpsertUser = db.prepare(`
-  INSERT INTO clipped_users (username, platform, clip_count, total_duration, first_clipped_at, last_clipped_at)
-  VALUES (@username, @platform, 1, @duration, @now, @now)
+  INSERT INTO clipped_users (username, platform, url, clip_count, total_duration, first_clipped_at, last_clipped_at)
+  VALUES (@username, @platform, @url, 1, @duration, @now, @now)
   ON CONFLICT(username, platform) DO UPDATE SET
     clip_count     = clip_count + 1,
     total_duration = total_duration + @duration,
+    url            = COALESCE(@url, url),
     last_clipped_at = @now
 `);
 
@@ -203,9 +216,9 @@ const stmtAllPlatStats = db.prepare('SELECT * FROM platform_stats ORDER BY clip_
  * Record a successfully completed clip into the users + platform registries.
  * Called once a job transitions to 'ready'.
  */
-const recordClipCompletion = db.transaction((username, platform, duration) => {
+const recordClipCompletion = db.transaction((username, platform, duration, url = null) => {
   const now = new Date().toISOString();
-  stmtUpsertUser.run({ username, platform, duration, now });
+  stmtUpsertUser.run({ username, platform, url, duration, now });
   stmtUpsertPlatform.run({ platform, duration, now });
 });
 
@@ -302,7 +315,7 @@ function cleanupOldClips() {
   }
 
   if (stale.length > 0) {
-    console.log(`[Clipper] Auto-cleanup: removed ${stale.length} stale clip(s) (>= ${process.env.CLIP_MAX_AGE_HOURS || 2}h old)`);
+    console.log(`[Clipper] Auto-cleanup: removed ${stale.length} stale clip(s) (>= ${process.env.CLIP_MAX_AGE_HOURS || 1}h old)`);
   }
 }
 
@@ -379,7 +392,52 @@ function shortLabel(raw) {
 }
 
 /**
- * Strip server-internal fields before sending a job to the client.
+ * Given a full stream URL, return the human-readable username/channel identifier.
+ * Falls back to the raw input if it isn't a recognisable URL.
+ *
+ * Examples:
+ *   YouTube  https://www.youtube.com/@mkbhd/live  → "mkbhd"
+ *   YouTube  https://www.youtube.com/watch?v=ABC  → "ABC"  (video ID)
+ *   Twitch   https://www.twitch.tv/xqc            → "xqc"
+ *   Kick     https://kick.com/xqc                 → "xqc"
+ */
+function extractUsernameFromUrl(raw, platform) {
+  if (typeof raw !== 'string' || !raw.startsWith('http')) return raw;
+
+  let parsed;
+  try { parsed = new URL(raw); } catch (_) { return raw; }
+
+  const hostname = parsed.hostname.replace(/^www\./, '');
+  const segments = parsed.pathname.split('/').filter(Boolean);
+
+  if (hostname === 'youtube.com' || hostname === 'm.youtube.com') {
+    // watch?v=VIDEO_ID
+    const v = parsed.searchParams.get('v');
+    if (v) return v;
+    // /@handle or /@handle/live
+    const handle = segments.find(s => s.startsWith('@'));
+    if (handle) return handle.slice(1); // strip leading @
+    // /channel/CHANNEL_ID or /c/name
+    if (segments.length >= 2 && ['channel', 'c', 'user'].includes(segments[0])) return segments[1];
+    if (segments[0]) return segments[0];
+  }
+
+  if (hostname === 'twitch.tv') {
+    // https://www.twitch.tv/<channel>
+    if (segments[0]) return segments[0];
+  }
+
+  if (hostname === 'kick.com') {
+    // https://kick.com/<slug>
+    if (segments[0]) return segments[0];
+  }
+
+  // Generic fallback: last non-empty path segment
+  return segments[segments.length - 1] || raw;
+}
+
+
+/**
  * Removes `outputFile` (absolute disk path) to avoid filesystem disclosure.
  */
 function publicJob(job) {
@@ -482,13 +540,13 @@ async function resolveYouTube(username) {
   if (YOUTUBE_API_KEY) {
     try {
       const chRes = await fetch(
-        `https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${encodeURIComponent(handle)}&key=${YOUTUBE_API_KEY}`
+        `${YOUTUBE_API_BASE}/channels?part=id&forHandle=${encodeURIComponent(handle)}&key=${YOUTUBE_API_KEY}`
       );
       if (chRes.ok) {
         const channelId = (await chRes.json())?.items?.[0]?.id;
         if (channelId) {
           const srRes = await fetch(
-            `https://www.googleapis.com/youtube/v3/search?part=id&channelId=${encodeURIComponent(channelId)}&eventType=live&type=video&key=${YOUTUBE_API_KEY}`
+            `${YOUTUBE_API_BASE}/search?part=id&channelId=${encodeURIComponent(channelId)}&eventType=live&type=video&key=${YOUTUBE_API_KEY}`
           );
           if (srRes.ok) {
             const videoId = (await srRes.json())?.items?.[0]?.id?.videoId;
@@ -537,7 +595,7 @@ async function resolveYouTube(username) {
  */
 async function resolveTwitch(username) {
   const handle = encodeURIComponent(username.replace(/^https?:\/\/[^/]+\//i, '').split('/')[0]);
-  const pageUrl = `https://www.twitch.tv/${handle}`;
+  const pageUrl = `${TWITCH_WEB_BASE}/${handle}`;
   try {
     const hlsUrl = await ytDlpGetUrl(pageUrl, ['--format', 'best[protocol^=m3u8]/best']);
     console.log(`[Twitch] Resolved HLS URL for ${handle}`);
@@ -556,7 +614,7 @@ async function resolveKick(username) {
   } else {
     slug = username.replace(/^@/, '').split('/')[0].trim();
   }
-  const pageUrl = `https://kick.com/${encodeURIComponent(slug)}`;
+  const pageUrl = `${KICK_WEB_BASE}/${encodeURIComponent(slug)}`;
   try {
     const hlsUrl = await ytDlpGetUrl(pageUrl, ['--format', 'best[protocol^=m3u8]/best']);
     console.log(`[Kick] Resolved HLS URL for ${slug}`);
@@ -580,6 +638,7 @@ function ytDlpGetUrl(pageUrl, extraArgs = []) {
     const args = [
       '--get-url',
       '--no-playlist',
+      ...(USER_AGENT ? ['--user-agent', USER_AGENT] : []),
       ...extraArgs,
       pageUrl,
     ];
@@ -678,6 +737,7 @@ async function captureClip(jobId, stream, duration, quality = 'medium', startOff
           '-preset veryfast',
           '-movflags +faststart',
           '-avoid_negative_ts make_zero',
+          ...(FFMPEG_THREADS > 0 ? [`-threads ${FFMPEG_THREADS}`] : []),
         ])
         .output(outFile)
         .on('progress', prog => {
@@ -728,6 +788,8 @@ async function captureClip(jobId, stream, duration, quality = 'medium', startOff
       '--socket-timeout', '20',
       '--retries', '3',
       '--fragment-retries', '3',
+      '--concurrent-fragments', String(YTDLP_CONCURRENT_FRAGS),
+      ...(USER_AGENT ? ['--user-agent', USER_AGENT] : []),
       '--format', formatArg,
       // android player_client uses InnerTube without requiring a PO Token,
       // which ios and web both now demand on VPS/datacenter IPs.
@@ -780,6 +842,7 @@ async function captureClip(jobId, stream, duration, quality = 'medium', startOff
       .outputOptions([
         '-preset veryfast',
         '-movflags +faststart',
+        ...(FFMPEG_THREADS > 0 ? [`-threads ${FFMPEG_THREADS}`] : []),
       ])
       .output(outFile)
       .on('progress', prog => {
@@ -815,13 +878,16 @@ async function captureClip(jobId, stream, duration, quality = 'medium', startOff
  *
  * @param {Object} opts
  * @param {string} opts.platform   'youtube'|'twitch'|'kick'
- * @param {string} opts.username   channel handle / URL
+ * @param {string} [opts.url]      full stream URL (preferred; username extracted automatically)
+ * @param {string} [opts.username] channel handle / URL (legacy; use url instead)
  * @param {number} [opts.duration] seconds to capture (capped at MAX_CLIP_SECONDS)
  * @param {'low'|'medium'|'high'} [opts.quality]
  * @returns {ClipJob}
  */
-function startClip({ platform, username, duration, quality = 'medium' }) {
-  if (!platform || !username) throw new Error('platform and username are required');
+function startClip({ platform, url, username, duration, quality = 'medium' }) {
+  // Accept either `url` (new) or `username` (legacy) — `url` takes precedence.
+  const rawInput = url || username;
+  if (!platform || !rawInput) throw new Error('platform and url are required');
 
   const normalPlatform = platform.toLowerCase();
   if (!VALID_PLATFORMS.includes(normalPlatform)) {
@@ -833,7 +899,13 @@ function startClip({ platform, username, duration, quality = 'medium' }) {
     throw new Error(`Invalid quality "${quality}". Valid: ${VALID_QUALITIES.join(', ')}`);
   }
 
-  const safeUser = sanitizeUsername(username);
+  // If a full URL was supplied, extract the channel/video identifier from it
+  // so the DB stores a clean, human-readable username rather than a raw URL.
+  const extractedUsername = extractUsernameFromUrl(rawInput, normalPlatform);
+  const safeUser = sanitizeUsername(extractedUsername);
+
+  // Preserve the original URL (if one was given) for storage alongside the username.
+  const originalUrl = rawInput.startsWith('http') ? rawInput : null;
 
   const secs = Math.min(
     MAX_CLIP_SECONDS,
@@ -861,15 +933,17 @@ function startClip({ platform, username, duration, quality = 'medium' }) {
       // captureClip so it can seek into the stream's DVR buffer and return
       // content that started at the click moment rather than after resolution.
       const resolveStart = Date.now();
-      const stream = await resolveStreamUrl(normalPlatform, safeUser);
+      // Use the original URL (or plain username) for stream resolution so that
+      // watch?v= URLs reach yt-dlp intact.  safeUser is only for DB storage.
+      const stream = await resolveStreamUrl(normalPlatform, rawInput);
       const startOffset = Math.round((Date.now() - resolveStart) / 1000);
 
       updateJob(job.id, { status: 'capturing', progress: 2, startOffset });
       const outFile = await captureClip(job.id, stream, secs, normalQuality, startOffset);
 
       updateJob(job.id, { status: 'ready', progress: 100, outputFile: outFile });
-      // Persist user + platform stats for completed clips
-      recordClipCompletion(safeUser, normalPlatform, secs);
+      // Persist user + platform stats for completed clips (include original URL)
+      recordClipCompletion(safeUser, normalPlatform, secs, originalUrl);
       console.log(`[Clipper] Job ${job.id} ready → ${outFile}`);
     } catch (err) {
       console.error(`[Clipper] Job ${job.id} failed:`, err.message);
@@ -892,15 +966,21 @@ const router = express.Router();
 
 /**
  * POST /api/clipper/clip
- * Body: { platform, username, duration?, quality? }
+ * Body: { platform, url, duration?, quality? }
+ *   `url`      — full stream URL (e.g. https://www.youtube.com/watch?v=…)
+ *                The channel/video username is extracted automatically and saved.
+ *   `username` — legacy alias for `url`; still accepted for backward compatibility.
  * Returns: { jobId, status, message }
  */
 router.post('/clip', clipCreationLimiter, apiKeyMiddleware, (req, res) => {
   try {
-    const { platform, username, duration, quality } = req.body || {};
+    const { platform, url, username, duration, quality } = req.body || {};
 
-    if (!platform || !username) {
-      return res.status(400).json({ error: 'platform and username are required' });
+    // Accept `url` (new) or `username` (legacy)
+    const rawInput = url || username;
+
+    if (!platform || !rawInput) {
+      return res.status(400).json({ error: 'platform and url are required' });
     }
 
     if (!VALID_PLATFORMS.includes((platform || '').toLowerCase())) {
@@ -909,7 +989,7 @@ router.post('/clip', clipCreationLimiter, apiKeyMiddleware, (req, res) => {
       });
     }
 
-    const job = startClip({ platform, username, duration, quality });
+    const job = startClip({ platform, url: rawInput, duration, quality });
 
     res.json({
       jobId: job.id,
@@ -1261,7 +1341,7 @@ router.delete('/clip/:jobId', apiKeyMiddleware, (req, res) => {
  * Response shape:
  * {
  *   users: [
- *     { id, username, platform, clip_count, total_duration,
+ *     { id, username, platform, url, clip_count, total_duration,
  *       first_clipped_at, last_clipped_at }
  *   ],
  *   total: <number>
@@ -1279,6 +1359,30 @@ router.get('/users', (req, res) => {
     rows = stmtAllUsers.all();
   }
   res.json({ users: rows, total: rows.length });
+});
+
+/**
+ * DELETE /api/clipper/users
+ * Wipe all rows from the clipped_users table and reset platform stats.
+ * Requires API key auth.
+ * Query params:
+ *   ?platform=youtube|twitch|kick  — delete only one platform's data
+ */
+router.delete('/users', apiKeyMiddleware, (req, res) => {
+  const { platform } = req.query;
+  if (platform) {
+    if (!VALID_PLATFORMS.includes(platform.toLowerCase())) {
+      return res.status(400).json({ error: `Invalid platform. Valid: ${VALID_PLATFORMS.join(', ')}` });
+    }
+    const plat = platform.toLowerCase();
+    db.prepare('DELETE FROM clipped_users WHERE platform = ?').run(plat);
+    db.prepare('DELETE FROM platform_stats WHERE platform = ?').run(plat);
+    return res.json({ ok: true, message: `Deleted all user data for platform: ${plat}` });
+  }
+
+  db.prepare('DELETE FROM clipped_users').run();
+  db.prepare('DELETE FROM platform_stats').run();
+  res.json({ ok: true, message: 'All user data deleted' });
 });
 
 /**
@@ -1313,9 +1417,9 @@ router.get('/jobs', (req, res) => {
 router.get('/platforms', (_req, res) => {
   res.json({
     platforms: [
-      { id: 'youtube', label: 'YouTube', usernameExample: 'mkbhd  OR  https://youtube.com/@mkbhd/live', method: 'yt-dlp → HLS' },
-      { id: 'twitch',  label: 'Twitch',  usernameExample: 'xqc',                                         method: 'yt-dlp → HLS' },
-      { id: 'kick',    label: 'Kick',    usernameExample: 'xqc',                                         method: 'Kick API → HLS / yt-dlp fallback' },
+      { id: 'youtube', label: 'YouTube', urlExample: 'https://www.youtube.com/@mkbhd/live  OR  https://www.youtube.com/watch?v=VIDEO_ID', method: 'yt-dlp → HLS' },
+      { id: 'twitch',  label: 'Twitch',  urlExample: 'https://www.twitch.tv/xqc',                                                        method: 'yt-dlp → HLS' },
+      { id: 'kick',    label: 'Kick',    urlExample: 'https://kick.com/xqc',                                                              method: 'Kick API → HLS / yt-dlp fallback' },
     ],
   });
 });
