@@ -393,3 +393,32 @@
   }
 
 })();
+
+/* ════════════════════════════════════════
+   Having trouble? — modal
+   ════════════════════════════════════════ */
+(function () {
+  var modal    = document.getElementById('trouble-modal');
+  var openBtn  = document.getElementById('trouble-btn');
+  var closeBtn = document.getElementById('trouble-close');
+  var gotIt    = document.getElementById('trouble-got-it');
+
+  if (!modal || !openBtn) return; // guard if elements are missing
+
+  function openModal()  { modal.classList.add('open');    document.body.style.overflow = 'hidden'; }
+  function closeModal() { modal.classList.remove('open'); document.body.style.overflow = ''; }
+
+  openBtn .addEventListener('click', openModal);
+  closeBtn.addEventListener('click', closeModal);
+  gotIt   .addEventListener('click', closeModal);
+
+  // Close on backdrop click
+  modal.addEventListener('click', function (e) {
+    if (e.target === modal) closeModal();
+  });
+
+  // Close on Escape
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && modal.classList.contains('open')) closeModal();
+  });
+})();
