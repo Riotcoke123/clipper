@@ -85,7 +85,7 @@ header {
 .logo-mark {
   width: 44px;
   height: 44px;
-  background: #7c3aed;
+  background: red;
   border-radius: 4px;
   display: flex;
   align-items: center;
