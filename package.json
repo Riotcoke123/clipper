@@ -16,7 +16,7 @@
     "url": "git+https://github.com/Riotcoke123/clipper.git"
   },
   "author": "Riotcoke123",
-  "license": "ISC",
+  "license": "GNU General Public License v3.0",
   "dependencies": {
     "better-sqlite3": "^12.9.0",
     "cors": "^2.8.5",
