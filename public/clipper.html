@@ -38,13 +38,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="clipper.css">
-</head>
+<link rel="stylesheet" href="clipper.css"></head>
 <body>
 
+ <img src="banner.webp" width="1280" height="568" alt="Stream Clipper banner" style="display:block;width:100%;height:auto;max-width:1280px;margin:0 auto 24px;">
 
 <div class="page-wrap"><br><br>
 
+ 
   <header>
     <div class="logo-mark">
       <svg viewBox="0 0 24 24" fill="none" stroke="#0c0e14" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -82,20 +83,20 @@
     spellcheck="false"
     placeholder="https://www.youtube.com/watch?v=..."
   />
-  <div class="platform-hint">paste a full live URL</div>
+  <div class="platform-hint">paste the full live URL</div>
 </div>
 
 <!-- Twitch input -->
 <div class="field" id="field-twitch" style="display:none">
-  <label for="username-input-twitch">Twitch channel URL or username</label>
+  <label for="username-input-twitch">Twitch channel username</label>
   <input
     type="text"
     id="username-input-twitch"
     autocomplete="off"
     spellcheck="false"
-    placeholder="https://www.twitch.tv/username  or  username"
+    placeholder="twitch username"
   />
-  <div class="platform-hint">e.g. https://www.twitch.tv/milkypuff  or  milkypuff</div>
+  <div class="platform-hint">paste username e.g. milkypuff</div>
 </div>
 
 <!-- Kick input -->
@@ -106,9 +107,9 @@
     id="username-input-kick"
     autocomplete="off"
     spellcheck="false"
-    placeholder="https://www.kick.com/username  or  username"
+    placeholder="kick username"
   />
-  <div class="platform-hint">paste https://www.kick.com/myrongainesx or myrongainesx</div>
+  <div class="platform-hint">paste username e.g. myrongainesx</div>
 </div>
 
     <!-- ── Stream preview ── -->
@@ -153,6 +154,26 @@
     </div>
 
     <button class="btn-capture" id="capture-btn">Capture Clip</button>
+    <p class="trouble-link-row"><button class="trouble-link" id="trouble-btn">Having trouble?</button></p>
+  </div>
+
+  <!-- ── TROUBLE MODAL ── -->
+  <div class="modal-backdrop" id="trouble-modal" role="dialog" aria-modal="true" aria-labelledby="trouble-title">
+    <div class="modal-box">
+      <button class="modal-close" id="trouble-close" aria-label="Close">&#x2715;</button>
+      <div class="modal-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      </div>
+      <h2 class="modal-title" id="trouble-title">Clip not starting?</h2>
+      <p class="modal-body">Stale cache or cookies can prevent the clipper from running. A quick browser reset almost always fixes it:</p>
+      <ol class="modal-steps">
+        <li><strong>Clear your browsing data</strong> — open your browser settings and clear cached files, cookies, and site data for this page.</li>
+        <li><strong>Hard-refresh the page</strong> — press <kbd>Ctrl</kbd>&nbsp;+&nbsp;<kbd>Shift</kbd>&nbsp;+&nbsp;<kbd>R</kbd> (Windows/Linux) or <kbd>⌘</kbd>&nbsp;+&nbsp;<kbd>Shift</kbd>&nbsp;+&nbsp;<kbd>R</kbd> (Mac) to force a clean reload.</li>
+        <li><strong>Try again</strong> — re-paste your stream URL and hit Capture Clip.</li>
+      </ol>
+      <p class="modal-footer-note">Still stuck? Try a different browser or disable any extensions (ad blockers, VPNs) for this site.</p>
+      <button class="btn-capture modal-dismiss-btn" id="trouble-got-it">Got it</button>
+    </div>
   </div>
 
   <!-- ── PROGRESS CARD ── -->
