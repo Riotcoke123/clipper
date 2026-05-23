@@ -4,7 +4,7 @@
 #   bash deploy.sh
 set -euo pipefail
 
-DOMAIN="clipper.iceposeidon.network"
+DOMAIN=""
 APP_DIR="/root/clipper"
 NODE_MIN=18
 
