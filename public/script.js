@@ -1,6 +1,6 @@
 (function () {
   /* ── State ── */
-  let API_KEY = ''; // Loaded dynamically from /api/clipper/config
+  let SESSION_TOKEN = ''; // Loaded from sessionStorage; obtained via POST /login
   let activePlatform = 'youtube';
   let pollInterval = null;
   let currentJobId = null;
@@ -75,9 +75,11 @@
   /* ── Initialization ── */
   async function init() {
     try {
-      const res = await fetch('/api/clipper/config');
+      // POST /login is open and returns a session token + config values.
+      // /config is locked to Bearer (admin only) — the API key never hits the browser.
+      const res    = await fetch('/api/clipper/login', { method: 'POST' });
       const config = await res.json();
-      API_KEY = config.apiKey;
+      SESSION_TOKEN = config.sessionToken;
       console.log("Configuration loaded.");
     } catch (err) {
       console.error("Failed to load configuration:", err);
@@ -132,7 +134,7 @@
         method: 'POST',
         headers: {
           'Content-Type':  'application/json',
-          'Authorization': `Bearer ${API_KEY}`
+          'Authorization': `Session ${SESSION_TOKEN}`
         },
         body: JSON.stringify(payload),
       });
@@ -158,7 +160,7 @@
 
       const res = await fetch(`/api/clipper/clip/${currentJobId}/catbox`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${API_KEY}` }
+        headers: { 'Authorization': `Session ${SESSION_TOKEN}` }
       });
       const data = await res.json();
 
@@ -184,7 +186,7 @@
 
       const res = await fetch(`/api/clipper/clip/${currentJobId}/quax`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${API_KEY}` }
+        headers: { 'Authorization': `Session ${SESSION_TOKEN}` }
       });
       const data = await res.json();
 
@@ -210,7 +212,7 @@
 
       const res = await fetch(`/api/clipper/clip/${currentJobId}/videy`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${API_KEY}` }
+        headers: { 'Authorization': `Session ${SESSION_TOKEN}` }
       });
       const data = await res.json();
 
