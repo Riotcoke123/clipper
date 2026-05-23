@@ -7,6 +7,7 @@ const { spawn } = require('child_process');
 const ffmpeg   = require('fluent-ffmpeg');
 const path     = require('path');
 const fs       = require('fs');
+const crypto   = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const fetch    = (...a) => import('node-fetch').then(({ default: f }) => f(...a));
 const Database = require('better-sqlite3');
@@ -45,6 +46,33 @@ if (!API_KEY || API_KEY.length < 32) {
 // different value; if omitted it falls back to CLIPPER_API_KEY so existing
 // deployments keep working without any changes.
 const BROWSER_KEY = process.env.CLIPPER_BROWSER_KEY || API_KEY;
+
+// In-memory session store: token → expiresAt (ms)
+// Sessions last 8 hours; they are also pruned every 30 minutes.
+const SESSION_TTL_MS = 8 * 3_600_000;
+const _sessions      = new Map(); // token → expiresAt
+
+function createSession() {
+  const token     = crypto.randomBytes(32).toString('hex');
+  const expiresAt = Date.now() + SESSION_TTL_MS;
+  _sessions.set(token, expiresAt);
+  return token;
+}
+
+function isValidSession(token) {
+  if (!token) return false;
+  const exp = _sessions.get(token);
+  if (!exp) return false;
+  if (Date.now() > exp) { _sessions.delete(token); return false; }
+  return true;
+}
+
+// Prune expired sessions periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [t, exp] of _sessions) { if (now > exp) _sessions.delete(t); }
+}, 30 * 60_000).unref();
+
 
 // How long to keep completed clip files on disk before auto-deleting.
 // Keeps disk usage bounded with multiple users.  Override with CLIP_MAX_AGE_HOURS.
@@ -400,13 +428,19 @@ setInterval(() => {
 
 /* ── API-key guard (always enforced) ─────────────────────── */
 function apiKeyMiddleware(req, res, next) {
-  const provided = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
-  // Accept either the master API_KEY (admin/server use) or the browser-facing
-  // BROWSER_KEY so browsers using the config-endpoint key can call all routes.
-  if (!provided || (provided !== API_KEY && provided !== BROWSER_KEY)) {
-    return res.status(401).json({ error: 'Unauthorized — valid API key required' });
+  const authHeader = req.headers['authorization'] || '';
+  // Accept server-side API key (Bearer) for programmatic/admin access.
+  const bearerToken = authHeader.replace(/^Bearer\s+/i, '');
+  if (bearerToken && (bearerToken === API_KEY || bearerToken === BROWSER_KEY)) {
+    return next();
   }
-  next();
+  // Also accept a browser session token (Session <token>) issued by /config.
+  // This keeps the real API key off the wire entirely.
+  const sessionToken = authHeader.startsWith('Session ') ? authHeader.slice(8).trim() : '';
+  if (sessionToken && isValidSession(sessionToken)) {
+    return next();
+  }
+  return res.status(401).json({ error: 'Unauthorized — valid API key or session required' });
 }
 
 /* ── Active-job concurrency counter ──────────────────────── */
@@ -1288,25 +1322,51 @@ router.get('/platforms', (_req, res) => {
 
 /**
  * GET /api/clipper/config
- * Returns config info for the frontend, including the API key so the
- * frontend can authenticate its POST requests.
- *
- * FIX: apiKey was previously omitted, causing script.js init() to load
- * an empty string, making every POST to /clip return 401 Unauthorized.
+/**
+ * GET /api/clipper/config
+ * Returns config info for the frontend and auto-issues a fresh session token.
+ * The session token (not the raw API key) is used by the browser for all
+ * subsequent mutating requests, so the real CLIPPER_API_KEY never leaves the server.
  */
-router.get('/config', (req, res) => {
+router.get('/config', apiKeyMiddleware, (req, res) => {
+  const sessionToken = createSession();
   res.json({
-    // BROWSER_KEY is a separate .env value (CLIPPER_BROWSER_KEY).
-    // If not set it falls back to CLIPPER_API_KEY, matching old behaviour.
-    // Using a distinct key means a leaked browser key can be rotated
-    // without touching the admin/server key.
-    apiKey:            BROWSER_KEY,
+    sessionToken,
     maxClipSeconds:    MAX_CLIP_SECONDS,
     defaultClipSecs:   DEFAULT_CLIP_SECS,
     maxConcurrentJobs: MAX_CONCURRENT_JOBS,
     platforms:         VALID_PLATFORMS,
     qualities:         VALID_QUALITIES,
   });
+});
+
+/**
+ * POST /api/clipper/login
+ * Open endpoint — issues a session token + config values the browser needs.
+ * The browser calls this on page load instead of /config so the real
+ * CLIPPER_API_KEY is never required on the client side.
+ */
+router.post('/login', (_req, res) => {
+  res.json({
+    sessionToken:      createSession(),
+    maxClipSeconds:    MAX_CLIP_SECONDS,
+    defaultClipSecs:   DEFAULT_CLIP_SECS,
+    maxConcurrentJobs: MAX_CONCURRENT_JOBS,
+    platforms:         VALID_PLATFORMS,
+    qualities:         VALID_QUALITIES,
+  });
+});
+
+/**
+ * POST /api/clipper/logout
+ * Body: (none — reads token from Authorization: Session <token>)
+ * Invalidates the session immediately.
+ */
+router.post('/logout', (req, res) => {
+  const header = req.headers['authorization'] || '';
+  const token  = header.startsWith('Session ') ? header.slice(8).trim() : '';
+  if (token) _sessions.delete(token);
+  res.json({ ok: true });
 });
 
 /* ============================================================
