@@ -67,6 +67,53 @@ body::before {
   z-index: 9999;
 }
 
+/* ── Banner: full-width, edge-to-edge, fixed height ── */
+.site-banner {
+  display: block;
+  width: calc(100% + 40px);
+  max-width: none;
+  margin: -40px -20px 24px;
+  height: 160px;
+  object-fit: cover;
+  object-position: center;
+}
+
+/* ── Phone portrait (≤480px) ── */
+@media (max-width: 480px) and (orientation: portrait) {
+  .site-banner {
+    width: calc(100% + 30px);
+    margin: -20px -15px 16px;
+    height: 100px;
+  }
+}
+
+/* ── Phone landscape (short viewport, wide) ── */
+@media (max-height: 500px) and (orientation: landscape) {
+  .site-banner {
+    width: calc(100% + 30px);
+    margin: -20px -15px 14px;
+    height: 70px;   /* keep it subtle so content is reachable */
+  }
+}
+
+/* ── Tablet portrait (481px – 1024px, taller than wide) ── */
+@media (min-width: 481px) and (max-width: 1024px) and (orientation: portrait) {
+  .site-banner {
+    width: calc(100% + 40px);
+    margin: -40px -20px 20px;
+    height: 140px;
+  }
+}
+
+/* ── Tablet landscape (min-width 768px, orientation landscape, not desktop) ── */
+@media (min-width: 768px) and (max-width: 1280px) and (orientation: landscape) {
+  .site-banner {
+    width: calc(100% + 40px);
+    margin: -40px -20px 24px;
+    height: 150px;
+  }
+}
+
 .page-wrap {
   width: 100%;
   max-width: 680px;
