@@ -37,11 +37,6 @@
   const qualitySelect  = document.getElementById('quality-select');
   const captureBtn     = document.getElementById('capture-btn');
 
-  const offsetSlider   = document.getElementById('offset-slider');
-  const offsetVal      = document.getElementById('offset-val');
-  const offsetBadge    = document.getElementById('offset-badge');
-  const offsetHint     = document.getElementById('offset-hint');
-
   const jobIdLine      = document.getElementById('job-id-line');
   const statusBadge    = document.getElementById('status-badge');
   const statusMsg      = document.getElementById('status-msg');
@@ -98,28 +93,6 @@
     durationVal.textContent = durationSlider.value + 's';
   });
 
-  offsetSlider.addEventListener('input', () => {
-    const secs = parseInt(offsetSlider.value);
-    if (secs === 0) {
-      offsetVal.textContent   = 'now';
-      offsetBadge.textContent = 'live';
-      offsetBadge.classList.remove('past');
-      offsetHint.textContent  = 'Capture the stream as it is right now.';
-    } else {
-      const display = secs < 60
-        ? `${secs}s ago`
-        : secs < 3600
-          ? `${Math.floor(secs/60)}m ${secs%60 > 0 ? (secs%60)+'s ' : ''}ago`.replace(' ago', ' ago')
-          : `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m ago`;
-      // clean up "0s ago" edge cases
-      const cleanDisplay = display.replace(' 0s ago', ' ago').replace(/\s+/g, ' ');
-      offsetVal.textContent   = cleanDisplay;
-      offsetBadge.textContent = `−${secs}s`;
-      offsetBadge.classList.add('past');
-      offsetHint.textContent  = `Clip will start ${cleanDisplay} in the stream's DVR buffer.`;
-    }
-  });
-
   /* ── Platform switching ── */
   chips.forEach(chip => {
     chip.addEventListener('click', () => {
@@ -150,8 +123,7 @@
       platform: activePlatform,
       username: username,
       duration: parseInt(durationSlider.value),
-      quality:  qualitySelect.value,
-      offset:   parseInt(offsetSlider.value)   // seconds to go back in the DVR buffer
+      quality:  qualitySelect.value
     };
 
     try {
