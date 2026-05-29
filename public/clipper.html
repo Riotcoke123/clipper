@@ -41,7 +41,7 @@
 <link rel="stylesheet" href="clipper.css"></head>
 <body>
 
- <img src="banner.webp" width="4000" height="165" alt="Stream Clipper banner" class="site-banner">
+ <a href="https://iceposeidon.network/" target="_blank" rel="noopener noreferrer" class="site-banner-link"><img src="banner.webp" width="4000" height="165" alt="Stream Clipper banner" class="site-banner"></a>
 
 <div class="page-wrap">
 
@@ -75,7 +75,7 @@
     </div>
 <!-- YouTube input -->
 <div class="field" id="field-youtube">
-  <label for="username-input-youtube" id="url-label-youtube">YouTube full stream URL</label>
+  <label for="username-input-youtube" id="url-label-youtube">YouTube Live Stream URL</label>
   <input
     type="text"
     id="username-input-youtube"
@@ -83,7 +83,7 @@
     spellcheck="false"
     placeholder="https://www.youtube.com/watch?v=..."
   />
-  <div class="platform-hint">paste the full live URL</div>
+  <div class="platform-hint">paste the full live Stream URL</div>
 </div>
 
 <!-- Twitch input -->
@@ -151,6 +151,22 @@
           <option value="high">High — 1080p</option>
         </select>
       </div>
+    </div>
+
+    <!-- ── Go-back offset ── -->
+    <div class="offset-row">
+      <div class="offset-label-row">
+        <label for="offset-slider">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/></svg>
+          Clip from past
+        </label>
+        <span class="offset-badge" id="offset-badge">live</span>
+      </div>
+      <div class="slider-wrap">
+        <input type="range" id="offset-slider" min="0" max="3600" step="30" value="0">
+        <span class="slider-val" id="offset-val">now</span>
+      </div>
+      <div class="offset-hint" id="offset-hint">Capture the stream as it is right now.</div>
     </div>
 
     <button class="btn-capture" id="capture-btn">Capture Clip</button>
@@ -263,13 +279,7 @@
     </div>
   </div>
 
-  <footer>
-    <a href="https://youtube.com" target="_blank" rel="noopener noreferrer">youtube</a> ·
-    <a href="https://twitch.tv" target="_blank" rel="noopener noreferrer">twitch</a> ·
-    <a href="https://kick.com" target="_blank" rel="noopener noreferrer">kick</a> ·
-    <a href="mailto:riotcokemedia@iceposeidon.network">riotcokemedia@iceposeidon.network</a> ·
-    <a href="https://iceposeidon.network/" target="_blank" rel="noopener noreferrer">ip2 streamer list</a>
-  </footer>
+
 </div>
 
 <script src="script.js" defer></script>

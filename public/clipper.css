@@ -68,19 +68,27 @@ body::before {
 }
 
 /* ── Banner: full-width, edge-to-edge, fixed height ── */
-.site-banner {
+.site-banner-link {
   display: block;
   width: calc(100% + 40px);
   max-width: none;
   margin: -40px -20px 24px;
   height: 160px;
+  line-height: 0;
+  flex-shrink: 0;
+}
+
+.site-banner {
+  display: block;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
   object-position: center;
 }
 
 /* ── Phone portrait (≤480px) ── */
 @media (max-width: 480px) and (orientation: portrait) {
-  .site-banner {
+  .site-banner-link {
     width: calc(100% + 30px);
     margin: -20px -15px 16px;
     height: 100px;
@@ -89,16 +97,16 @@ body::before {
 
 /* ── Phone landscape (short viewport, wide) ── */
 @media (max-height: 500px) and (orientation: landscape) {
-  .site-banner {
+  .site-banner-link {
     width: calc(100% + 30px);
     margin: -20px -15px 14px;
-    height: 70px;   /* keep it subtle so content is reachable */
+    height: 70px;
   }
 }
 
 /* ── Tablet portrait (481px – 1024px, taller than wide) ── */
 @media (min-width: 481px) and (max-width: 1024px) and (orientation: portrait) {
-  .site-banner {
+  .site-banner-link {
     width: calc(100% + 40px);
     margin: -40px -20px 20px;
     height: 140px;
@@ -107,7 +115,7 @@ body::before {
 
 /* ── Tablet landscape (min-width 768px, orientation landscape, not desktop) ── */
 @media (min-width: 768px) and (max-width: 1280px) and (orientation: landscape) {
-  .site-banner {
+  .site-banner-link {
     width: calc(100% + 40px);
     margin: -40px -20px 24px;
     height: 150px;
@@ -200,6 +208,7 @@ header p {
   font-weight: 500;
   color: var(--text-muted);
   transition: all 0.15s;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -348,6 +357,63 @@ select {
 }
 
 select:focus { border-color: var(--amber); }
+
+/* ── Go-back offset row ── */
+.offset-row {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.offset-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.offset-label-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  cursor: default;
+}
+
+.offset-badge {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: rgba(45,217,122,0.12);
+  color: var(--green);
+  border: 1px solid rgba(45,217,122,0.3);
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.offset-badge.past {
+  background: rgba(232,160,32,0.12);
+  color: var(--amber);
+  border-color: rgba(232,160,32,0.35);
+}
+
+.offset-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: 'Inter', sans-serif;
+  line-height: 1.4;
+}
 
 /* ── Buttons ── */
 .btn-capture {
