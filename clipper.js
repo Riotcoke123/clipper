@@ -716,13 +716,17 @@ async function captureClip(jobId, stream, duration, quality = 'medium', startOff
         '-reconnect', '1',
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '5',
-        // Seek into the DVR buffer to the click moment
-        '-live_start_index', '0',
+        // -1 = start from the oldest segment in the DVR buffer (full lookback range).
+        // This is required for large offsets; '0' only goes back a few segments.
+        '-live_start_index', '-1',
       ];
-      if (startOffset > 0) {
-        inputOptions.push('-ss', String(startOffset));
-      }
-      inputOptions.push('-t', String(duration));
+
+      // For DVR seeks: place -ss as an OUTPUT option (post-demux) rather than an
+      // input option. Post-input seek is frame-accurate and works correctly on
+      // segmented HLS — pre-input seek on live HLS is unreliable for large offsets
+      // because ffmpeg cannot calculate a byte position into the manifest.
+      const outputSeekOptions = startOffset > 0 ? ['-ss', String(startOffset)] : [];
+      inputOptions.push('-t', String(duration + startOffset)); // read enough data to reach the clip window
 
       // Track last written progress so we never go backwards
       let lastPct = 5;
@@ -734,6 +738,8 @@ async function captureClip(jobId, stream, duration, quality = 'medium', startOff
         .audioBitrate('128k')
         .videoFilter(`scale=${sizeFilter}`)
         .outputOptions([
+          ...outputSeekOptions,          // post-input seek to user's requested moment
+          '-t', String(duration),        // then capture exactly this many seconds
           '-preset veryfast',
           '-movflags +faststart',
           '-avoid_negative_ts make_zero',
@@ -884,7 +890,7 @@ async function captureClip(jobId, stream, duration, quality = 'medium', startOff
  * @param {'low'|'medium'|'high'} [opts.quality]
  * @returns {ClipJob}
  */
-function startClip({ platform, url, username, duration, quality = 'medium' }) {
+function startClip({ platform, url, username, duration, quality = 'medium', userOffset = 0 }) {
   // Accept either `url` (new) or `username` (legacy) — `url` takes precedence.
   const rawInput = url || username;
   if (!platform || !rawInput) throw new Error('platform and url are required');
@@ -912,6 +918,10 @@ function startClip({ platform, url, username, duration, quality = 'medium' }) {
     Math.max(5, Number(duration) || DEFAULT_CLIP_SECS)
   );
 
+  // How far back in the DVR buffer to seek (user-supplied, in seconds).
+  // Cap at 3600 s (1 hour) — most platforms don't keep more than that in DVR.
+  const clampedUserOffset = Math.min(3600, Math.max(0, Number(userOffset) || 0));
+
   if (_activeJobs >= MAX_CONCURRENT_JOBS) {
     throw Object.assign(
       new Error(`Server busy — max ${MAX_CONCURRENT_JOBS} concurrent jobs`),
@@ -936,7 +946,10 @@ function startClip({ platform, url, username, duration, quality = 'medium' }) {
       // Use the original URL (or plain username) for stream resolution so that
       // watch?v= URLs reach yt-dlp intact.  safeUser is only for DB storage.
       const stream = await resolveStreamUrl(normalPlatform, rawInput);
-      const startOffset = Math.round((Date.now() - resolveStart) / 1000);
+      // Total seek = user's desired DVR lookback + time lost to URL resolution.
+      // e.g. user wants 5 min ago → seek 300 s + ~3 s resolution = 303 s into buffer.
+      const resolveDelay = Math.round((Date.now() - resolveStart) / 1000);
+      const startOffset  = clampedUserOffset + resolveDelay;
 
       updateJob(job.id, { status: 'capturing', progress: 2, startOffset });
       const outFile = await captureClip(job.id, stream, secs, normalQuality, startOffset);
@@ -974,7 +987,7 @@ const router = express.Router();
  */
 router.post('/clip', clipCreationLimiter, apiKeyMiddleware, (req, res) => {
   try {
-    const { platform, url, username, duration, quality } = req.body || {};
+    const { platform, url, username, duration, quality, offset } = req.body || {};
 
     // Accept `url` (new) or `username` (legacy)
     const rawInput = url || username;
@@ -989,7 +1002,7 @@ router.post('/clip', clipCreationLimiter, apiKeyMiddleware, (req, res) => {
       });
     }
 
-    const job = startClip({ platform, url: rawInput, duration, quality });
+    const job = startClip({ platform, url: rawInput, duration, quality, userOffset: offset || 0 });
 
     res.json({
       jobId: job.id,
