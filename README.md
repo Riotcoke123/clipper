@@ -18,7 +18,7 @@
         Stream Clipper is a production-ready utility designed to capture and process highlights from live broadcasts. By leveraging <code>yt-dlp</code> for stream manifest resolution and <code>FFmpeg</code> for segmented recording, it provides a seamless way to generate high-quality <strong>.mp4</strong> clips from active live streams.
     </p>
     <p>
-        The application avoids unreliable VOD-based scraping options by pre-resolving broadcasts to direct HLS manifest URLs. It then captures video directly from the stream's live edge or oldest available DVR frames, utilizing highly resilient reconnection parameters designed for modern live infrastructure.
+        The application avoids unreliable VOD-based scraping options by pre-resolving broadcasts to direct HLS manifest URLs. It captures video directly from the stream's live edge or utilizing DVR buffer offsets, employing highly resilient reconnection parameters designed for modern live infrastructure.
     </p>
 </section>
 
@@ -26,11 +26,11 @@
     <h2>Key Features</h2>
     <ul>
         <li><strong>Broad Platform Support:</strong> Native handling for <strong>YouTube</strong>, <strong>Twitch</strong>, and <strong>Kick</strong> with handle-to-stream resolution.</li>
-        <li><strong>Live Preview:</strong> Real-time stream embedding in the UI to confirm the broadcast status before triggering a capture.</li>
+        <li><strong>Live Preview & Time Travel:</strong> Real-time stream embedding in the UI to confirm the broadcast status, along with DVR offset support to clip past events (e.g., "-60s ago").</li>
         <li><strong>Dynamic Quality Profiles:</strong> Targeted scaling down to <strong>Low (360p)</strong>, <strong>Medium (720p)</strong>, or up to <strong>High (1080p)</strong> resolutions.</li>
-        <li><strong>Reliable Job Management:</strong> Powered by a persistent <code>better-sqlite3</code> engine running under Write-Ahead Logging (WAL) mode for fast, concurrent status tracking.</li>
+        <li><strong>Reliable Job & Stats Management:</strong> Powered by a persistent <code>better-sqlite3</code> engine running under Write-Ahead Logging (WAL) mode for fast, concurrent job status tracking and global platform/user analytics.</li>
         <li><strong>Instant Distribution:</strong> Fully integrated one-click mirror uploads to <strong>Catbox</strong>, <strong>qu.ax</strong>, and <strong>Videy</strong> directly from the client interface.</li>
-        <li><strong>Multi-Layered Security:</strong> Mandatory 32-character API key enforcement split into admin and browser tiers, Server-Side Request Forgery (SSRF) guards restricting stream target hosts, strict UUID validation, and an in-memory IP rate limiter segmented by route.</li>
+        <li><strong>Multi-Layered Security:</strong> Mandatory 32-character API key enforcement split into admin and browser tiers, Server-Side Request Forgery (SSRF) guards restricting stream target hosts, strict UUID validation, and an in-memory IP rate limiter segmented by endpoint.</li>
         <li><strong>Production Infrastructure:</strong> Includes turn-key automation scripts for multi-stage system deployments, Nginx reverse proxy management, Let's Encrypt SSL configuration, and custom Fail2ban brute-force protection.</li>
     </ul>
 </section>
@@ -91,7 +91,7 @@ bash harden.sh</code></pre>
             </tr>
             <tr>
                 <td><code>CLIPPER_BROWSER_KEY</code></td>
-                <td>Separate browser-facing key provided to the frontend payload.</td>
+                <td>Separate browser-facing key provided to the frontend payload. Falls back to API key if omitted.</td>
                 <td>None</td>
             </tr>
             <tr>
@@ -107,22 +107,37 @@ bash harden.sh</code></pre>
             <tr>
                 <td><code>MAX_CONCURRENT_JOBS</code></td>
                 <td>The maximum number of resolution, capture, and encoding instances running simultaneously.</td>
-                <td><code>3</code></td>
+                <td><code>5</code></td>
             </tr>
             <tr>
                 <td><code>FFMPEG_THREADS</code></td>
-                <td>Number of threads allocated for FFmpeg video encoding.</td>
-                <td><code>2</code></td>
+                <td>Number of threads allocated for FFmpeg video encoding. (0 allows FFmpeg to auto-scale)</td>
+                <td><code>0</code></td>
             </tr>
             <tr>
                 <td><code>YTDLP_CONCURRENT_FRAGS</code></td>
                 <td>Number of concurrent fragment downloads permitted by yt-dlp.</td>
-                <td><code>3</code></td>
+                <td><code>1</code></td>
             </tr>
             <tr>
                 <td><code>CLIP_MAX_AGE_HOURS</code></td>
                 <td>How long to keep completed clip files on disk before auto-deleting them.</td>
                 <td><code>1</code></td>
+            </tr>
+            <tr>
+                <td><code>RATE_LIMIT_WINDOW_MS</code></td>
+                <td>Window span in milliseconds for tracking active rate limits.</td>
+                <td><code>60000</code></td>
+            </tr>
+            <tr>
+                <td><code>RATE_LIMIT_MAX_CLIPS</code></td>
+                <td>Maximum number of new clips an IP address can start within the specified time window.</td>
+                <td><code>5</code></td>
+            </tr>
+            <tr>
+                <td><code>RATE_LIMIT_MAX_POLLS</code></td>
+                <td>Maximum number of status checks an IP address can make within the specified time window.</td>
+                <td><code>300</code></td>
             </tr>
             <tr>
                 <td><code>DB_PATH</code></td>
@@ -142,7 +157,7 @@ bash harden.sh</code></pre>
             <tr>
                 <td><code>USER_AGENT</code></td>
                 <td>Custom User-Agent string used for web scraping and API requests.</td>
-                <td><code>Mozilla/5.0...</code></td>
+                <td>None</td>
             </tr>
             <tr>
                 <td><code>YOUTUBE_API_KEY</code></td>
@@ -156,7 +171,7 @@ bash harden.sh</code></pre>
             </tr>
             <tr>
                 <td><code>CATBOX_USERHASH</code></td>
-                <td>Optional hash key to tie Catbox file uploads permanently to an account.</td>
+                <td>Optional hash key to tie Catbox file uploads permanently to an account. Uploads as guest if missing.</td>
                 <td>None</td>
             </tr>
             <tr>
