@@ -679,6 +679,33 @@ async function resolveStreamUrl(platform, username) {
 }
 
 /**
+ * Fetch a live HLS media playlist and return the total duration of its
+ * buffered segments (i.e. the DVR window length) in seconds.
+ *
+ * This is used to compute the correct seek position for rewind:
+ *   seek = dvr_duration − rewind_offset − elapsed
+ * which places the capture start at exactly (click_time − rewind_offset)
+ * relative to the live edge at the moment the user pressed Capture.
+ *
+ * @param {string} playlistUrl  Direct URL to an HLS media playlist (.m3u8)
+ * @returns {Promise<number>}   Total buffered duration in seconds
+ * @throws if the fetch fails or the playlist contains no #EXTINF tags
+ */
+async function getHlsDvrDuration(playlistUrl) {
+  const resp = await fetch(playlistUrl, {
+    headers: USER_AGENT ? { 'User-Agent': USER_AGENT } : {},
+  });
+  if (!resp.ok) throw new Error(`HLS playlist HTTP ${resp.status}`);
+  const text = await resp.text();
+  let total = 0;
+  for (const m of text.matchAll(/#EXTINF:([\d.]+)/g)) {
+    total += parseFloat(m[1]);
+  }
+  if (total === 0) throw new Error('No #EXTINF tags found in playlist');
+  return total;
+}
+
+/**
  * Cut a clip from an HLS or FLV stream.
  *
  * For HLS streams we use yt-dlp (handles manifests, retries, auth).
@@ -928,22 +955,55 @@ function startClip({ platform, url, username, duration, quality = 'medium', rewi
       const downloadUrl = `/clips/clip_${job.id}.mp4`;
       updateJob(job.id, { status: 'resolving', progress: 1, downloadUrl });
 
-      // Record the exact moment the user pressed Capture (job.createdAt) and
-      // measure how long URL resolution takes.  This offset is passed to
-      // captureClip so it can seek into the stream's DVR buffer and return
-      // content that started at the click moment rather than after resolution.
+      // Resolve the stream URL, noting the exact start time so we can account
+      // for all elapsed time (resolution + m3u8 fetch) in the seek calculation.
       const resolveStart = Date.now();
       // Use the original URL (or plain username) for stream resolution so that
       // watch?v= URLs reach yt-dlp intact.  safeUser is only for DB storage.
       const stream = await resolveStreamUrl(normalPlatform, rawInput);
-      const resolutionSecs = Math.round((Date.now() - resolveStart) / 1000);
 
-      // startOffset controls how far into the DVR buffer ffmpeg seeks.
-      // resolutionSecs compensates for URL-resolution delay so the clip starts
-      // at click time.  rewindOffset shifts the window further back so users
-      // can capture moments that already passed — clamped at 0 so we never
-      // seek before the buffer's oldest segment.
-      const startOffset = Math.max(0, resolutionSecs - rewindOffset);
+      // ── Compute DVR seek position ──────────────────────────────────────
+      // With -live_start_index 0, ffmpeg always reads from the *oldest* segment
+      // in the HLS playlist.  -ss X then seeks X seconds forward from there.
+      //
+      // To land the clip start at exactly (clickTime − rewindOffset):
+      //   seek = DVR_duration − rewindOffset − totalElapsed
+      //
+      // where:
+      //   DVR_duration  = total duration of buffered segments in the playlist
+      //   rewindOffset  = seconds the user wants to go back from click time
+      //   totalElapsed  = seconds spent on URL resolution + m3u8 fetch
+      //                   (the live edge advances by this much before ffmpeg starts)
+      //
+      // Example — DVR=180s, rewind=120s, elapsed=6s:
+      //   seek = 180 − 120 − 6 = 54  → oldest segment is at T−180, +54s = T−126 ≈ T−120 ✓
+      //
+      // For yt-dlp fallback streams we cannot parse the playlist in advance;
+      // fall back to compensating for resolution delay only.
+      let startOffset = 0;
+
+      if (stream.type === 'hls') {
+        try {
+          const dvrDuration = await getHlsDvrDuration(stream.url);
+          const totalElapsed = Math.round((Date.now() - resolveStart) / 1000);
+          startOffset = Math.max(0, Math.round(dvrDuration - rewindOffset - totalElapsed));
+          console.log(
+            `[Clipper] Job ${job.id}: DVR=${Math.round(dvrDuration)}s ` +
+            `rewind=${rewindOffset}s elapsed=${totalElapsed}s → seek=${startOffset}s`
+          );
+        } catch (err) {
+          console.warn(
+            `[Clipper] Job ${job.id}: DVR parse failed (${err.message}) — ` +
+            `starting from oldest available segment`
+          );
+          // startOffset stays 0: ffmpeg starts from the oldest DVR segment
+        }
+      } else {
+        // yt-dlp mode: --download-sections uses stream-relative timestamps.
+        // Compensate for resolution delay only; rewind is best-effort here.
+        const resolutionSecs = Math.round((Date.now() - resolveStart) / 1000);
+        startOffset = Math.max(0, resolutionSecs - rewindOffset);
+      }
 
       updateJob(job.id, { status: 'capturing', progress: 2, startOffset });
       const outFile = await captureClip(job.id, stream, secs, normalQuality, startOffset);
