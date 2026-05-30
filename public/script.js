@@ -126,7 +126,7 @@
       rewindBadge.appendChild(document.createTextNode(` −${label}`));
       rewindBadge.classList.add('rewound');
       rewindSlider.classList.add('is-rewound');
-      rewindHint.textContent = `clip will start ${label} before you hit Capture`;
+      rewindHint.textContent = `Capture will freeze the stream at that moment and go back ${label} to start the clip`;
     }
   }
   rewindSlider.addEventListener('input', updateRewindUI);
