@@ -72,6 +72,12 @@
   const streamPreviewIframe  = document.getElementById('stream-preview-iframe');
   const streamPreviewUnavail = document.getElementById('stream-preview-unavail');
 
+  // Rewind control
+  const rewindSlider  = document.getElementById('rewind-slider');
+  const rewindVal     = document.getElementById('rewind-val');
+  const rewindBadge   = document.getElementById('rewind-badge');
+  const rewindHint    = document.getElementById('rewind-hint');
+
   /* ── Initialization ── */
   async function init() {
     try {
@@ -92,6 +98,38 @@
   durationSlider.addEventListener('input', () => {
     durationVal.textContent = durationSlider.value + 's';
   });
+
+  /* ── Rewind slider ── */
+  function updateRewindUI() {
+    const secs = parseInt(rewindSlider.value, 10);
+    if (secs === 0) {
+      rewindVal.textContent = '0s';
+      rewindBadge.textContent = '';
+      rewindBadge.classList.remove('rewound');
+      // Rebuild badge content for "LIVE" (dot + text)
+      const dot = document.createElement('span');
+      dot.className = 'dot live-dot rewind-live-dot';
+      rewindBadge.appendChild(dot);
+      rewindBadge.appendChild(document.createTextNode(' LIVE'));
+      rewindSlider.classList.remove('is-rewound');
+      rewindHint.textContent = 'drag right to clip a moment from earlier in the stream';
+    } else {
+      const label = secs >= 60
+        ? (secs % 60 === 0 ? `${secs / 60}m` : `${Math.floor(secs / 60)}m ${secs % 60}s`)
+        : `${secs}s`;
+      rewindVal.textContent = label;
+      rewindBadge.innerHTML = '';
+      // Rebuild badge content for rewound state (dot + text)
+      const dot = document.createElement('span');
+      dot.className = 'dot rewind-live-dot';
+      rewindBadge.appendChild(dot);
+      rewindBadge.appendChild(document.createTextNode(` −${label}`));
+      rewindBadge.classList.add('rewound');
+      rewindSlider.classList.add('is-rewound');
+      rewindHint.textContent = `clip will start ${label} before you hit Capture`;
+    }
+  }
+  rewindSlider.addEventListener('input', updateRewindUI);
 
   /* ── Platform switching ── */
   chips.forEach(chip => {
@@ -123,7 +161,8 @@
       platform: activePlatform,
       username: username,
       duration: parseInt(durationSlider.value),
-      quality:  qualitySelect.value
+      quality:  qualitySelect.value,
+      rewindOffset: parseInt(rewindSlider.value, 10)
     };
 
     try {
@@ -309,6 +348,9 @@
     streamPreviewUnavail.classList.remove('visible');
     // Clear all three platform inputs
     Object.values(inputs).forEach(input => { if (input) input.value = ''; });
+    // Reset rewind slider to live
+    rewindSlider.value = 0;
+    updateRewindUI();
     catboxBtn.disabled = false;
     catboxUploading = false;
     catboxStatus.innerHTML = '';
