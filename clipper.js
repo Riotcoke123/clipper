@@ -884,7 +884,7 @@ async function captureClip(jobId, stream, duration, quality = 'medium', startOff
  * @param {'low'|'medium'|'high'} [opts.quality]
  * @returns {ClipJob}
  */
-function startClip({ platform, url, username, duration, quality = 'medium' }) {
+function startClip({ platform, url, username, duration, quality = 'medium', rewindOffset = 0 }) {
   // Accept either `url` (new) or `username` (legacy) — `url` takes precedence.
   const rawInput = url || username;
   if (!platform || !rawInput) throw new Error('platform and url are required');
@@ -936,7 +936,14 @@ function startClip({ platform, url, username, duration, quality = 'medium' }) {
       // Use the original URL (or plain username) for stream resolution so that
       // watch?v= URLs reach yt-dlp intact.  safeUser is only for DB storage.
       const stream = await resolveStreamUrl(normalPlatform, rawInput);
-      const startOffset = Math.round((Date.now() - resolveStart) / 1000);
+      const resolutionSecs = Math.round((Date.now() - resolveStart) / 1000);
+
+      // startOffset controls how far into the DVR buffer ffmpeg seeks.
+      // resolutionSecs compensates for URL-resolution delay so the clip starts
+      // at click time.  rewindOffset shifts the window further back so users
+      // can capture moments that already passed — clamped at 0 so we never
+      // seek before the buffer's oldest segment.
+      const startOffset = Math.max(0, resolutionSecs - rewindOffset);
 
       updateJob(job.id, { status: 'capturing', progress: 2, startOffset });
       const outFile = await captureClip(job.id, stream, secs, normalQuality, startOffset);
@@ -944,7 +951,7 @@ function startClip({ platform, url, username, duration, quality = 'medium' }) {
       updateJob(job.id, { status: 'ready', progress: 100, outputFile: outFile });
       // Persist user + platform stats for completed clips (include original URL)
       recordClipCompletion(safeUser, normalPlatform, secs, originalUrl);
-      console.log(`[Clipper] Job ${job.id} ready → ${outFile}`);
+      console.log(`[Clipper] Job ${job.id} ready → ${outFile}${rewindOffset > 0 ? ` (rewound ${rewindOffset}s)` : ''}`);
     } catch (err) {
       console.error(`[Clipper] Job ${job.id} failed:`, err.message);
       updateJob(job.id, { status: 'error', error: err.message });
@@ -974,7 +981,7 @@ const router = express.Router();
  */
 router.post('/clip', clipCreationLimiter, apiKeyMiddleware, (req, res) => {
   try {
-    const { platform, url, username, duration, quality } = req.body || {};
+    const { platform, url, username, duration, quality, rewindOffset } = req.body || {};
 
     // Accept `url` (new) or `username` (legacy)
     const rawInput = url || username;
@@ -989,7 +996,10 @@ router.post('/clip', clipCreationLimiter, apiKeyMiddleware, (req, res) => {
       });
     }
 
-    const job = startClip({ platform, url: rawInput, duration, quality });
+    // Validate rewindOffset: must be a non-negative integer, capped at 300 s
+    const safeRewind = Math.min(300, Math.max(0, Number(rewindOffset) || 0));
+
+    const job = startClip({ platform, url: rawInput, duration, quality, rewindOffset: safeRewind });
 
     res.json({
       jobId: job.id,
