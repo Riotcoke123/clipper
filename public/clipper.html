@@ -153,6 +153,25 @@
       </div>
     </div>
 
+    <!-- ── Rewind control ── -->
+    <div class="rewind-row" id="rewind-row">
+      <div class="rewind-row-header">
+        <label class="rewind-label" for="rewind-slider">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+          Rewind
+        </label>
+        <span class="rewind-badge" id="rewind-badge">
+          <span class="dot live-dot rewind-live-dot"></span>
+          LIVE
+        </span>
+      </div>
+      <div class="slider-wrap">
+        <input type="range" id="rewind-slider" min="0" max="120" step="5" value="0" class="rewind-range">
+        <span class="slider-val" id="rewind-val">0s</span>
+      </div>
+      <div class="platform-hint" id="rewind-hint">drag right to clip a moment from earlier in the stream</div>
+    </div>
+
     <button class="btn-capture" id="capture-btn">Capture Clip</button>
     <p class="trouble-link-row"><button class="trouble-link" id="trouble-btn">Having trouble?</button></p>
   </div>
@@ -172,6 +191,7 @@
         <li><strong>Try again</strong> — re-paste your stream URL and hit Capture Clip.</li>
       </ol>
       <p class="modal-footer-note">Still stuck? Try a different browser or disable any extensions (ad blockers, VPNs) for this site.</p>
+      <p class="modal-footer-note" style="margin-top:10px;opacity:0.6;font-style:italic;">🛠️ Updates coming soon.</p>
       <button class="btn-capture modal-dismiss-btn" id="trouble-got-it">Got it</button>
     </div>
   </div>
@@ -268,4 +288,4 @@
 
 <script src="script.js" defer></script>
 </body>
-</html>
+</html
