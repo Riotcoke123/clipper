@@ -8,6 +8,7 @@
         <img src="https://img.shields.io/badge/SQLite-07405E?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite">
         <img src="https://img.shields.io/badge/PM2-2B037A?style=flat-square&logo=pm2&logoColor=white" alt="PM2">
         <img src="https://img.shields.io/badge/Nginx-009639?style=flat-square&logo=nginx&logoColor=white" alt="Nginx">
+        <img src="https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     </div>
 </header>
 
@@ -28,16 +29,39 @@
 </ul>
 
 <h2>Prerequisites</h2>
-<p>If you are setting this up manually, ensure your system has the following installed:</p>
+<p>If you are setting this up manually or natively, ensure your system has the following installed:</p>
 <ul>
     <li>Node.js v18 or higher (Node 20 LTS recommended).</li>
     <li>yt-dlp (latest version).</li>
     <li>FFmpeg.</li>
     <li>SQLite3.</li>
+    <li><em>Or simply use Docker (see below).</em></li>
+</ul>
+
+<h2>Docker Deployment (Recommended)</h2>
+<p>The most reliable and isolated way to deploy Stream Clipper is via Docker. The provided configuration uses a multi-stage Dockerfile that bundles Node.js 20, FFmpeg, and yt-dlp out of the box[cite: 4, 5].</p>
+
+<ol>
+    <li>Make sure <strong>Docker</strong> and <strong>Docker Compose</strong> are installed on your host system.</li>
+    <li>Clone the repository and copy the example environment file:
+        <pre><code>cp .env.example .env</code></pre>
+    </li>
+    <li>Configure your <code>.env</code> file with your API keys and secure <code>CLIPPER_API_KEY</code>.</li>
+    <li>Build and start the container in detached mode:
+        <pre><code>docker-compose up -d --build</code></pre>
+    </li>
+</ol>
+
+<h3>Docker Architecture Notes</h3>
+<ul>
+    <li><strong>Persistent Volumes:</strong> The Compose file automatically creates volumes for your SQLite database (<code>clipper-db</code>), generated MP4 clips (<code>clipper-clips</code>), temp processing files (<code>clipper-temp</code>), and logs (<code>clipper-logs</code>) so you don't lose data on container rebuilds.</li>
+    <li><strong>Security Constraints:</strong> The container runs under a non-root <code>clipper</code> user, drops all unused Linux capabilities, and implements a strict health check on the login endpoint[cite: 6, 7].</li>
+    <li><strong>Resource Limits:</strong> To prevent FFmpeg from starving your host server, the container is hard-capped at 1GB of memory and 2 CPU cores.</li>
+    <li><strong>Networking:</strong> By default, the app is exposed purely to <code>127.0.0.1:4242</code>. It is highly recommended to route external traffic through a reverse proxy (like Nginx or Caddy) to handle HTTPS.</li>
 </ul>
 
 <h2>Automated Deployment (Ubuntu/Debian)</h2>
-<p>A comprehensive deployment script is included to provision a server from scratch. It automatically installs Nginx, Let's Encrypt (Certbot), PM2, FFmpeg, Node.js 20, and yt-dlp.</p>
+<p>If you prefer a native, non-Docker installation, a comprehensive deployment script is included to provision a server from scratch. It automatically installs Nginx, Let's Encrypt (Certbot), PM2, FFmpeg, Node.js 20, and yt-dlp.</p>
 
 <pre><code>chmod +x deploy.sh
 sudo ./deploy.sh</code></pre>
@@ -58,11 +82,11 @@ sudo ./harden.sh</code></pre>
 </ul>
 
 <h2>Manual Installation & Development</h2>
-<p>To run the application locally without the automated deployment script:</p>
+<p>To run the application locally without Docker or the automated deployment script:</p>
 <ol>
     <li>Clone the repository and run <code>npm install</code>.</li>
     <li>Ensure your <code>.env</code> is fully populated with the required keys.</li>
-    <li>Start the server in development mode using <code>npm run dev</code>.</li>
+    <li>Start the server in development mode using <code>node clipper.js</code> or <code>npm run dev</code>.</li>
     <li>The application will be accessible locally at <code>http://localhost:4242</code>.</li>
 </ol>
 
