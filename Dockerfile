@@ -23,9 +23,6 @@ RUN curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp 
         -o /usr/local/bin/yt-dlp && \
     chmod +x /usr/local/bin/yt-dlp
 
-# Create non-root user for security
-RUN groupadd -r clipper && useradd -r -g clipper -m clipper
-
 WORKDIR /app
 
 # Copy installed node_modules from deps stage
@@ -38,16 +35,13 @@ COPY package.json     ./
 # Copy frontend assets into public/
 COPY public/          ./public/
 
-# Create data directories and fix ownership
-RUN mkdir -p public/clips temp logs && \
-    chown -R clipper:clipper /app
-
-USER clipper
+# Create data directories
+RUN mkdir -p public/clips temp logs
 
 EXPOSE 4242
 
-# Health check — polls the login endpoint (open, no auth needed)
+# Health check — polls the root path
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD curl -sf -X POST http://localhost:4242/api/clipper/login > /dev/null || exit 1
+    CMD curl -sf http://localhost:4242/ > /dev/null || exit 1
 
 CMD ["node", "clipper.js"]

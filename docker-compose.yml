@@ -10,7 +10,6 @@ services:
 
     ports:
       # Expose on localhost only — Nginx (or any reverse proxy) sits in front.
-      # Change to "4242:4242" if you want direct public access (not recommended).
       - "127.0.0.1:4242:4242"
 
     env_file:
@@ -18,15 +17,15 @@ services:
 
     volumes:
       # Persist the SQLite database between container restarts / rebuilds
-      - clipper-db:/app/clipper.db
+      - clipper-db:/app
 
-      # Persist finished clips (optional — remove if you only want in-memory clips)
+      # Persist finished clips
       - clipper-clips:/app/public/clips
 
-      # Persist temp working directory across restarts (avoids orphaned files)
+      # Persist temp working directory across restarts
       - clipper-temp:/app/temp
 
-      # Persist PM2-style logs outside the container
+      # Persist logs outside the container
       - clipper-logs:/app/logs
 
     # Limit blast radius if the app misbehaves
@@ -41,16 +40,6 @@ services:
     # Drop all Linux capabilities that the Node process doesn't need
     cap_drop:
       - ALL
-    cap_add:
-      - CHOWN   # only needed at startup; dropped once files are owned correctly
-      - SETUID
-      - SETGID
-
-    # Read-only root filesystem where possible; writable paths are mounted above
-    # (uncomment if your image supports it fully)
-    # read_only: true
-    # tmpfs:
-    #   - /tmp
 
     logging:
       driver: "json-file"

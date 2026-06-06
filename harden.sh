@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# harden.sh — SSH brute-force & Nginx protection
+# harden.sh — SSH brute-force & Nginx protection for 204.13.232.252
 # Run as root AFTER deploy.sh, or standalone on any Ubuntu/Debian server
 set -euo pipefail
-
-# ─── Configuration ────────────────────────────────────────────────────────────
-APP_PORT=4242                              # <-- port your Node app listens on
-NGINX_ACCESS_LOG="/var/log/nginx/access.log"  # <-- your app's Nginx access log
 
 echo "════════════════════════════════════════════════════"
 echo "  Fail2ban + UFW Hardening"
@@ -28,7 +24,7 @@ bantime  = 3600
 findtime = 600
 # Allow 5 failures before banning
 maxretry = 5
-# Ignore localhost — add your own management IPs here if needed
+# Ignore localhost and your own IP (add yours here)
 ignoreip = 127.0.0.1/8 ::1
 # Use iptables
 banaction = iptables-multiport
@@ -81,14 +77,14 @@ ignoreregex =
 EOF
 
 # Add it to jail.local
-cat >> /etc/fail2ban/jail.local << EOF
+cat >> /etc/fail2ban/jail.local << 'EOF'
 
 # ── Nginx: generic 4xx flood ──────────────────────────────────────────────────
 [nginx-4xx]
 enabled  = true
 filter   = nginx-4xx
 port     = http,https
-logpath  = $NGINX_ACCESS_LOG
+logpath  = /var/log/nginx/clipper.access.log
 maxretry = 30
 findtime = 60
 bantime  = 1800
@@ -110,8 +106,9 @@ ufw allow ssh
 ufw allow 80/tcp
 ufw allow 443/tcp
 
-# Block direct Node access — Nginx proxies externally, no need to expose it
-ufw deny "$APP_PORT"/tcp
+# Allow direct Node access on :4242 ONLY from localhost
+# (Nginx proxies externally — no need to expose 4242 publicly)
+ufw deny 4242/tcp
 
 # Enable without prompt
 ufw --force enable

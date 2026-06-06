@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
-# deploy.sh — Full production setup for a Node.js stream clipper app
-# Run as root on your server:
+# deploy.sh — Full production setup for clipper.iceposeidon.network
+# Run as root on 204.13.232.252:
 #   bash deploy.sh
 set -euo pipefail
 
-# ─── Configuration ────────────────────────────────────────────────────────────
-DOMAIN="your-domain.example.com"       # <-- set your domain
-APP_PORT=4242                           # <-- port your Node app listens on
-APP_DIR="/root/clipper"                 # <-- where the app will live
+DOMAIN="clipper.iceposeidon.network"
+APP_DIR="/root/clipper"
 NODE_MIN=18
 
 echo "════════════════════════════════════════════════════"
 echo "  Stream Clipper — Production Deploy"
-echo "  Target: $DOMAIN → localhost:$APP_PORT"
+echo "  Target: $DOMAIN → localhost:4242"
 echo "════════════════════════════════════════════════════"
 
 # ─── 1. System packages ──────────────────────────────────────────────────────
@@ -88,21 +86,21 @@ echo ""
 echo "▶ [7/9] Configuring Nginx..."
 
 # Temporarily serve plain HTTP so certbot can get a cert
-cat > /etc/nginx/sites-available/"$DOMAIN".conf << NGINX_HTTP_ONLY
+cat > /etc/nginx/sites-available/"$DOMAIN".conf << 'NGINX_HTTP_ONLY'
 server {
     listen 80;
     listen [::]:80;
-    server_name $DOMAIN;
+    server_name clipper.iceposeidon.network;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
     }
     location / {
-        proxy_pass http://127.0.0.1:$APP_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_pass http://127.0.0.1:4242;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 NGINX_HTTP_ONLY
@@ -127,8 +125,8 @@ pm2 startup | tail -1 | bash || true   # register PM2 as system service
 
 echo "   Waiting for app to be ready..."
 sleep 3
-if curl -sf http://127.0.0.1:$APP_PORT/ > /dev/null; then
-    echo "   ✓ App is responding on :$APP_PORT"
+if curl -sf http://127.0.0.1:4242/ > /dev/null; then
+    echo "   ✓ App is responding on :4242"
 else
     echo "   ✗ App did not respond — check: pm2 logs clipper"
 fi
@@ -145,7 +143,7 @@ certbot --nginx \
     --register-unsafely-without-email \
     --redirect
 
-# Drop the full HTTPS Nginx config in place (must be alongside this script)
+# Now drop the full HTTPS config in place
 cp "$SCRIPT_DIR/$DOMAIN.conf" /etc/nginx/sites-available/"$DOMAIN".conf
 nginx -t && systemctl reload nginx
 
@@ -154,6 +152,7 @@ echo "════════════════════════�
 echo "  ✓ Deploy complete!"
 echo ""
 echo "  Site:    https://$DOMAIN"
+echo "  Direct:  http://204.13.232.252:4242"
 echo "  App dir: $APP_DIR"
 echo ""
 echo "  Useful commands:"
