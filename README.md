@@ -18,9 +18,9 @@
 <h2>Features</h2>
 <ul>
     <li><strong>Multi-Platform Support:</strong> Extract clips from YouTube, Twitch, and Kick live streams.</li>
-    <li><strong>DVR Rewind (New):</strong> A rewind slider UI allows users to capture moments from earlier in the stream (up to 120 seconds back via the UI, with the backend supporting up to 300 seconds). The backend utilizes a <code>startOffset</code> parameter to seek directly into the HLS DVR buffer for precise historical clipping.</li>
-    <li><strong>Advanced YouTube Extraction (New):</strong> Uses <code>yt-dlp</code> to hit the YouTube Android <code>player_client</code> innertube API. This bypasses PO Token requirements for VPS/datacenter IPs and avoids the channel-page scraper that frequently causes 404 errors.</li>
-    <li><strong>Direct HLS Capture (New):</strong> Pre-resolves Twitch and Kick streams to direct HLS URLs, passing them straight to native FFmpeg for highly reliable live-edge clipping instead of relying on <code>yt-dlp</code> section downloads.</li>
+    <li><strong>DVR Rewind:</strong> A rewind slider UI allows users to capture moments from earlier in the stream (up to 120 seconds back via the UI, with the backend supporting up to 300 seconds). The backend utilizes a <code>startOffset</code> parameter to seek directly into the HLS DVR buffer for precise historical clipping.</li>
+    <li><strong>Advanced YouTube Extraction:</strong> Uses <code>yt-dlp</code> to hit the YouTube Android <code>player_client</code> innertube API. This bypasses PO Token requirements for VPS/datacenter IPs and avoids the channel-page scraper that frequently causes 404 errors.</li>
+    <li><strong>Direct HLS Capture:</strong> Pre-resolves Twitch and Kick streams to direct HLS URLs, passing them straight to native FFmpeg for highly reliable live-edge clipping instead of relying on <code>yt-dlp</code> section downloads.</li>
     <li><strong>Direct Uploads:</strong> Instantly push clipped MP4 files to Catbox, qu.ax, or Videy through dedicated server-side proxy routes.</li>
     <li><strong>Live Previews:</strong> Embedded iframe support to preview streams before clipping, featuring a mobile-friendly touch shield to prevent layout issues.</li>
     <li><strong>Automated Cleanup:</strong> Background jobs run every 30 minutes to automatically remove stale MP4 clips and temporary raw files, keeping disk usage strictly bounded.</li>
@@ -31,10 +31,10 @@
 <h2>Prerequisites</h2>
 <p>If you are setting this up manually or natively, ensure your system has the following installed:</p>
 <ul>
-    <li>Node.js v18 or higher (Node 20 LTS recommended).</li>
-    <li>yt-dlp (latest version).</li>
-    <li>FFmpeg.</li>
-    <li>SQLite3.</li>
+    <li>Node.js v18 or higher (Node 20 LTS recommended)</li>
+    <li>yt-dlp (latest version)</li>
+    <li>FFmpeg</li>
+    <li>SQLite3</li>
     <li><em>Or simply use Docker (see below).</em></li>
 </ul>
 
