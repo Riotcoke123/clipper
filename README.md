@@ -1,5 +1,5 @@
 <header>
-    <h1>Stream Clipper <small>v1.3.1</small></h1>
+    <h1>Stream Clipper <small>v1.4</small></h1>
     <div style="display: flex; gap: 8px; margin-top: 10px; margin-bottom: 16px; flex-wrap: wrap;">
         <img src="https://img.shields.io/badge/version-v1.3.1-blue.svg?style=flat-square" alt="Version 1.3.1">
         <img src="https://img.shields.io/badge/license-GPL-brightgreen.svg?style=flat-square" alt="GPL License">
