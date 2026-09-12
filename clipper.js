@@ -501,6 +501,26 @@ function apiKeyMiddleware(req, res, next) {
   return res.status(401).json({ error: 'Unauthorized — valid API key or session required' });
 }
 
+/* ── Admin-only guard ─────────────────────────────────────── */
+// Stricter than apiKeyMiddleware: only the real, server-side CLIPPER_API_KEY
+// is accepted — NOT the browser key and NOT a session token.
+//
+// This matters because POST /login is an *open, unauthenticated* endpoint —
+// anyone who can reach the server can call it and receive a valid session
+// token (that's by design, so the frontend never needs to embed a key).
+// A session token is therefore no stronger than "any random visitor" and
+// must never be treated as proof of admin intent. Destructive or
+// server-wide operations (wiping the analytics DB, listing every user's
+// job history) need to require the operator's own secret key.
+function requireAdminKey(req, res, next) {
+  const authHeader  = req.headers['authorization'] || '';
+  const bearerToken = authHeader.replace(/^Bearer\s+/i, '');
+  if (bearerToken && bearerToken === API_KEY) {
+    return next();
+  }
+  return res.status(401).json({ error: 'Unauthorized — admin API key required' });
+}
+
 /* ── Active-job concurrency counter ──────────────────────── */
 let _activeJobs = 0;
 
@@ -1438,7 +1458,7 @@ router.get('/users', (req, res) => {
  * Query params:
  *   ?platform=youtube|twitch|kick  — delete only one platform's data
  */
-router.delete('/users', apiKeyMiddleware, (req, res) => {
+router.delete('/users', requireAdminKey, (req, res) => {
   const { platform } = req.query;
   if (platform) {
     if (!VALID_PLATFORMS.includes(platform.toLowerCase())) {
@@ -1474,8 +1494,11 @@ router.get('/stats', (req, res) => {
 /**
  * GET /api/clipper/jobs
  * List all jobs (most recent first, max 100) — internal paths stripped.
+ * Admin-only: this discloses every job's UUID (a capability token used by
+ * DELETE /clip/:jobId) plus every user's clipped username, so it must not
+ * be reachable with a freely-obtainable session token.
  */
-router.get('/jobs', (req, res) => {
+router.get('/jobs', requireAdminKey, (req, res) => {
   const list = jobs.values().map(publicJob);
   res.json({ jobs: list, total: jobs.size });
 });
