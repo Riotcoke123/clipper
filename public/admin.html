@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Clipper — Admin</title>
+<link rel="stylesheet" href="clipper.css">
+<style>
+  body { max-width: 780px; margin: 0 auto; padding: 32px 20px 80px; }
+  .admin-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+  .admin-card h2 { margin-top: 0; font-size: 1.1rem; }
+  .file-row { display: flex; justify-content: space-between; padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06); font-family: monospace; font-size: 0.85rem; }
+  .file-row .action { padding: 1px 8px; border-radius: 4px; font-size: 0.75rem; }
+  .action.added { background: rgba(80,200,120,0.2); color: #7ee0a0; }
+  .action.modified { background: rgba(230,180,60,0.2); color: #f0c674; }
+  .hist-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 0.9rem; }
+  #drop-zone { border: 2px dashed rgba(255,255,255,0.2); border-radius: 10px; padding: 30px;
+    text-align: center; cursor: pointer; }
+  #drop-zone.drag { border-color: #7ee0a0; background: rgba(126,224,160,0.06); }
+  .btn { cursor: pointer; }
+  .btn.danger { background: #c0392b; }
+  #modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    display: none; align-items: center; justify-content: center; z-index: 50; }
+  #modal-backdrop.open { display: flex; }
+  #password-modal { background: #1b1b22; border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 12px; padding: 24px; width: 320px; }
+  .msg { font-size: 0.85rem; margin-top: 8px; }
+  .msg.error { color: #ff8080; }
+  .msg.ok { color: #7ee0a0; }
+</style>
+</head>
+<body>
+
+<h1>Clipper — Admin</h1>
+
+<div class="admin-card" id="login-card">
+  <h2>Sign in</h2>
+  <input type="password" id="login-password" placeholder="Admin password" style="width:100%;padding:10px;margin-bottom:10px;">
+  <button class="btn" id="login-btn">Sign in</button>
+  <div class="msg error" id="login-error"></div>
+</div>
+
+<div id="panel" style="display:none">
+  <div class="admin-card">
+    <h2>Deploy an update</h2>
+    <p style="opacity:0.7;font-size:0.85rem">
+      Upload either the full project zip or a changed-files-only zip — both work the same way:
+      whatever files are in the zip get added or updated, everything else is left alone.
+    </p>
+    <div id="drop-zone">Drop a .zip here, or click to choose a file</div>
+    <input type="file" id="file-input" accept=".zip" style="display:none">
+    <div class="msg" id="upload-status"></div>
+  </div>
+
+  <div class="admin-card" id="preview-card" style="display:none">
+    <h2>Staged changes</h2>
+    <div id="file-list"></div>
+    <div style="margin-top:16px;display:flex;gap:10px">
+      <button class="btn" id="apply-btn">Apply Update</button>
+      <button class="btn danger" id="discard-btn">Discard</button>
+    </div>
+    <div class="msg" id="apply-status"></div>
+  </div>
+
+  <div class="admin-card">
+    <h2>Update history</h2>
+    <div id="history-list"><span style="opacity:0.6">Loading…</span></div>
+  </div>
+</div>
+
+<div id="modal-backdrop">
+  <div id="password-modal">
+    <h3 id="modal-title" style="margin-top:0">Confirm password</h3>
+    <p style="font-size:0.85rem;opacity:0.7" id="modal-desc"></p>
+    <input type="password" id="modal-password" placeholder="Admin password" style="width:100%;padding:10px;margin-bottom:10px;">
+    <div style="display:flex;gap:10px">
+      <button class="btn" id="modal-confirm">Confirm</button>
+      <button class="btn" id="modal-cancel" style="background:#444">Cancel</button>
+    </div>
+    <div class="msg error" id="modal-error"></div>
+  </div>
+</div>
+
+<script src="admin.js" defer></script>
+</body>
+</html>

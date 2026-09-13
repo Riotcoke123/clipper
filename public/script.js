@@ -409,11 +409,11 @@
           twitchChannel = u.pathname.replace(/^\//, '').split('/')[0];
         }
       } catch (_) {}
-      embedUrl = `https://player.twitch.tv/?channel=${twitchChannel}&parent=${window.location.hostname}&muted=true`;
+      embedUrl = `https://player.twitch.tv/?channel=${encodeURIComponent(twitchChannel)}&parent=${encodeURIComponent(window.location.hostname)}&muted=true`;
     } else if (activePlatform === 'kick') {
       let kickSlug = val;
       try { kickSlug = new URL(val).pathname.replace(/^\//, '').split('/')[0]; } catch (_) {}
-      embedUrl = `https://player.kick.com/${kickSlug}`;
+      embedUrl = `https://player.kick.com/${encodeURIComponent(kickSlug)}`;
     } else if (activePlatform === 'youtube') {
       const ytId = extractYoutubeId(val);
       if (ytId) embedUrl = `https://www.youtube.com/embed/${ytId}?autoplay=1&mute=1`;
