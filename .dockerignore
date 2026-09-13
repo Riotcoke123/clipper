@@ -5,6 +5,9 @@ node_modules/
 public/clips/
 temp/
 logs/
+backups/
+.staging/
+.update-state.json
 *.db
 *.db-wal
 *.db-shm
