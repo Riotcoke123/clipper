@@ -37,9 +37,16 @@ services:
         reservations:
           memory: 256m
 
-    # Drop all Linux capabilities that the Node process doesn't need
+    # Drop all Linux capabilities except the two the entrypoint needs to
+    # chown the mounted volumes and drop from root to the unprivileged
+    # `clipper` user at startup (see docker-entrypoint.sh). The Node
+    # process itself runs as `clipper`, not root, once gosu hands off.
     cap_drop:
       - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
 
     logging:
       driver: "json-file"

@@ -20,7 +20,8 @@ RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends \
         ffmpeg \
         curl \
-        ca-certificates && \
+        ca-certificates \
+        gosu && \
     rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux \
@@ -30,15 +31,26 @@ RUN curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY clipper.js   ./
-COPY package.json ./
-COPY public/      ./public/
+COPY clipper.js          ./
+COPY admin.js            ./
+COPY update-guard.js     ./
+COPY package.json        ./
+COPY public/             ./public/
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-RUN mkdir -p public/clips temp logs
+RUN mkdir -p public/clips temp logs backups .staging && \
+    groupadd -r clipper && useradd -r -g clipper -d /app clipper && \
+    chown -R clipper:clipper /app && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 4242
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD curl -sf http://localhost:4242/ > /dev/null || exit 1
 
+# Container starts as root (needed once, to fix volume ownership below),
+# then docker-entrypoint.sh immediately drops to the unprivileged `clipper`
+# user via gosu before exec'ing node — the app process itself never runs
+# as root.
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "clipper.js"]

@@ -1,5 +1,11 @@
 'use strict';
 
+// Must run before anything else: if the previous boot applied an update
+// and crashed before confirming it was healthy, restore the pre-update
+// files now so this boot runs the last known-good code. See update-guard.js.
+const updateGuard = require('./update-guard');
+updateGuard.checkAndRollbackIfNeeded();
+
 require('dotenv').config();
 
 const express  = require('express');
@@ -53,12 +59,36 @@ if (!API_KEY || API_KEY.length < 32) {
 // deployments keep working without any changes.
 const BROWSER_KEY = process.env.CLIPPER_BROWSER_KEY || API_KEY;
 
+/**
+ * Constant-time string comparison.  Using `===` on secrets (API keys,
+ * tokens) leaks timing information that lets an attacker recover the
+ * secret byte-by-byte over many requests.  crypto.timingSafeEqual requires
+ * equal-length buffers, so unequal lengths are rejected up front (that
+ * length check is not secret-dependent, so it doesn't reopen the timing
+ * side-channel).
+ */
+function safeCompare(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 // In-memory session store: token → expiresAt (ms)
 // Sessions last 8 hours; they are also pruned every 30 minutes.
 const SESSION_TTL_MS = 8 * 3_600_000;
 const _sessions      = new Map(); // token → expiresAt
+// Defense in depth alongside loginLimiter: even a distributed caller
+// (many source IPs, each under the per-IP limit) can't grow this Map
+// past a hard ceiling — oldest sessions get evicted first.
+const MAX_SESSIONS = Number(process.env.MAX_SESSIONS) || 10_000;
 
 function createSession() {
+  if (_sessions.size >= MAX_SESSIONS) {
+    const oldestKey = _sessions.keys().next().value;
+    if (oldestKey !== undefined) _sessions.delete(oldestKey);
+  }
   const token     = crypto.randomBytes(32).toString('hex');
   const expiresAt = Date.now() + SESSION_TTL_MS;
   _sessions.set(token, expiresAt);
@@ -129,6 +159,25 @@ const VALID_QUALITIES  = ['low', 'medium', 'high'];
  * @property {string|null} error
  * @property {string}  createdAt      ISO timestamp
  */
+
+/* ── Update-guard crash handlers ─────────────────────────────
+   If a fatal, unhandled error happens while we're still inside the
+   confirmation window of a just-applied update (see update-guard.js),
+   automatically restore the pre-update files before exiting, so the
+   process manager's restart boots clean instead of crash-looping on
+   the bad update. Outside that window this is a no-op and the process
+   just exits/restarts as it normally would.
+   ────────────────────────────────────────────────────────────── */
+process.on('uncaughtException', (err) => {
+  console.error('[Clipper] Uncaught exception:', err);
+  updateGuard.handleFatalError(err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[Clipper] Unhandled rejection:', reason);
+  updateGuard.handleFatalError(reason instanceof Error ? reason : new Error(String(reason)));
+  process.exit(1);
+});
 
 const db = new Database(DB_PATH);
 
@@ -477,6 +526,14 @@ function makeRateLimiter(maxReq, bucketKey = 'default') {
 const clipCreationLimiter = makeRateLimiter(RATE_LIMIT_MAX_CLIPS, 'clip');
 // Loose: high enough that polling every 2 s across 5 active jobs never hits it.
 const pollLimiter         = makeRateLimiter(RATE_LIMIT_MAX_POLLS, 'poll');
+// POST /login is open/unauthenticated by design (see requireAdminKey comment
+// below) and mints a session token — and therefore a new entry in the
+// in-memory _sessions Map — on every single call. Without a ceiling, an
+// attacker can call it in a tight loop to grow that Map without bound and
+// exhaust server memory. A generous per-IP ceiling still comfortably covers
+// real page loads/reloads.
+const RATE_LIMIT_MAX_LOGINS = Number(process.env.RATE_LIMIT_MAX_LOGINS) || 20;
+const loginLimiter          = makeRateLimiter(RATE_LIMIT_MAX_LOGINS, 'login');
 
 // Prune stale buckets periodically to avoid memory growth
 setInterval(() => {
@@ -489,7 +546,7 @@ function apiKeyMiddleware(req, res, next) {
   const authHeader = req.headers['authorization'] || '';
   // Accept server-side API key (Bearer) for programmatic/admin access.
   const bearerToken = authHeader.replace(/^Bearer\s+/i, '');
-  if (bearerToken && (bearerToken === API_KEY || bearerToken === BROWSER_KEY)) {
+  if (bearerToken && (safeCompare(bearerToken, API_KEY) || safeCompare(bearerToken, BROWSER_KEY))) {
     return next();
   }
   // Also accept a browser session token (Session <token>) issued by /config.
@@ -515,7 +572,7 @@ function apiKeyMiddleware(req, res, next) {
 function requireAdminKey(req, res, next) {
   const authHeader  = req.headers['authorization'] || '';
   const bearerToken = authHeader.replace(/^Bearer\s+/i, '');
-  if (bearerToken && bearerToken === API_KEY) {
+  if (bearerToken && safeCompare(bearerToken, API_KEY)) {
     return next();
   }
   return res.status(401).json({ error: 'Unauthorized — admin API key required' });
@@ -1543,7 +1600,7 @@ router.get('/config', apiKeyMiddleware, (req, res) => {
  * The browser calls this on page load instead of /config so the real
  * CLIPPER_API_KEY is never required on the client side.
  */
-router.post('/login', (_req, res) => {
+router.post('/login', loginLimiter, (_req, res) => {
   res.json({
     sessionToken:      createSession(),
     maxClipSeconds:    MAX_CLIP_SECONDS,
@@ -1573,8 +1630,51 @@ if (require.main === module) {
   const app  = express();
   const PORT = process.env.PORT || 4242;
 
+  // deploy.sh / docker-compose.yml both put Nginx in front of this process
+  // on the same host. Without `trust proxy`, req.ip resolves to Nginx's
+  // address (127.0.0.1) for every request, which silently collapses the
+  // per-IP rate limiters into one shared global bucket. `1` trusts exactly
+  // one hop (the local reverse proxy) and reads the real client IP from
+  // X-Forwarded-For — correct for this deployment. Set TRUST_PROXY=0 if you
+  // ever run this process directly exposed with no reverse proxy in front.
+  const TRUST_PROXY = process.env.TRUST_PROXY;
+  app.set('trust proxy', TRUST_PROXY === '0' ? false : (Number(TRUST_PROXY) || 1));
+
+  // Baseline security headers. No extra dependency (helmet) needed for this
+  // small a set. CSP is scoped to what the frontend actually uses: Google
+  // Fonts, and Twitch/Kick/YouTube embeds in the stream-preview iframe.
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader(
+      'Content-Security-Policy',
+      [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com",
+        "img-src 'self' data: https:",
+        "media-src 'self' blob:",
+        "connect-src 'self'",
+        "frame-src https://player.twitch.tv https://player.kick.com https://www.youtube.com",
+        "frame-ancestors 'none'",
+        "object-src 'none'",
+        "base-uri 'self'",
+      ].join('; ')
+    );
+    next();
+  });
+
   app.use(express.json());
   app.use('/api/clipper', router);
+
+  // Admin self-update panel — only mounted in standalone mode (see comment
+  // on module.exports below): if this router is ever embedded inside a
+  // larger app instead, that app shouldn't be forced to also configure
+  // ADMIN_PASSWORD and expose an update-deployment surface it didn't ask for.
+  const adminRouter = require('./admin').router;
+  app.use('/api/admin', adminRouter);
 
   // Serve finished clips at /clips/<filename>
   app.use('/clips', express.static(CLIP_OUTPUT_DIR));
@@ -1591,10 +1691,25 @@ if (require.main === module) {
       ? res.sendFile(page)
       : res.status(404).send('Place clipper.html + clipper.css in the public/ folder.');
   });
+
+  // Admin panel page (the panel itself is password-gated via /api/admin/login —
+  // serving the static HTML shell here is not a privilege boundary).
+  app.get('/admin', (_req, res) => {
+    const page = path.join(publicDir, 'admin.html');
+    fs.existsSync(page) ? res.sendFile(page) : res.status(404).send('admin.html not found in public/.');
+  });
+
   app.listen(PORT, () => {
     console.log(`[Clipper] Standalone server on http://localhost:${PORT}`);
     console.log(`[Clipper] POST http://localhost:${PORT}/api/clipper/clip`);
     console.log(`[Clipper] Clips saved to: ${CLIP_OUTPUT_DIR}`);
+    console.log(`[Clipper] Admin panel: http://localhost:${PORT}/admin`);
+
+    // If this boot followed an applied update, staying alive and serving
+    // for the confirmation window means the update is good — clear the
+    // pending state so update-guard.js won't roll it back on some later,
+    // unrelated crash.
+    setTimeout(() => updateGuard.confirmBootSuccess(), updateGuard.CONFIRM_WINDOW_MS);
   });
 }
 
